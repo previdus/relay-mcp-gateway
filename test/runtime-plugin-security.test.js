@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { request as httpRequest } from 'node:http';
 import express from 'express';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { SqliteStore } from '../dist/store.js';
@@ -18,6 +19,28 @@ test('health checks work before a cloud hostname is assigned while gateway route
 
   const admin = await fetch(`${gatewayUrl}/admin/`, { headers: { Host: 'internal-load-balancer.local' } });
   assert.notEqual(admin.status, 200, 'normal routes remain protected by host validation');
+});
+
+test('the MCP router receives the same deployment host allow-list as the outer runtime', async t => {
+  const store = new SqliteStore(':memory:', { allowLocalHttp: true, clients: [{ id: 'health-probe', tokenEnv: 'SERVICE_TOKEN', allow: ['never'] }], upstreams: [] });
+  t.after(() => store.close());
+  const gatewayUrl = await listen(createRuntime(store, { adminKey: adminToken, environment: { SERVICE_TOKEN: serviceToken }, allowedHosts: ['gateway.example'] }), t);
+  const response = await new Promise((resolve, reject) => {
+    const request = httpRequest(new URL(`${gatewayUrl}/mcp`), {
+      method: 'POST',
+      headers: { host: 'gateway.example', Authorization: `Bearer ${serviceToken}`, Accept: 'application/json, text/event-stream', 'Content-Type': 'application/json' }
+    }, incoming => {
+      const chunks = [];
+      incoming.on('data', chunk => chunks.push(chunk));
+      incoming.on('end', () => resolve({ status: incoming.statusCode, body: Buffer.concat(chunks).toString() }));
+    });
+    request.on('error', reject);
+    request.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2026-07-28', capabilities: {}, clientInfo: { name: 'host-validation-test', version: '1' } } }));
+  });
+  assert.equal(response.status, 200, response.body);
+  const message = response.body.match(/^data: (.+)$/m)?.[1];
+  assert.ok(message, response.body);
+  assert.equal(JSON.parse(message).result.protocolVersion, '2025-11-25');
 });
 
 test('an injected authorizer adds restrictions and cannot replace deployment allow-list or OPA policy', async t => {

@@ -378,7 +378,7 @@ export function createRuntime(store: ConfigStore, options: {
       const snapshot = await store.read();
       if (!cached || cached.revision !== snapshot.revision) {
         const config = loadConfig(snapshot.document, environment);
-        cached = { revision: snapshot.revision, app: createGateway(config, { ...pluginsFor(config), configurationRevision: snapshot.revision, isRevisionCurrent: async () => (await store.read()).revision === snapshot.revision }) };
+        cached = { revision: snapshot.revision, app: createGateway({ ...config, allowedHosts: options.allowedHosts ?? config.allowedHosts }, { ...pluginsFor(config), configurationRevision: snapshot.revision, isRevisionCurrent: async () => (await store.read()).revision === snapshot.revision }) };
       }
       cached.app(req, res, next);
     } catch { res.status(503).json({ error: 'Gateway configuration unavailable' }); }
