@@ -36,6 +36,8 @@ test('website build contains a product story, sourced comparison and complete do
   assert.match(docs, /data-config-scenario="blocked"/);
   assert.match(docs, /data-config-step="destination"/);
   assert.match(docs, /This is an explanatory prototype/);
+  assert.match(docs, /20 settings/);
+  assert.match(docs, /data-setting-search="GATEWAY_CREDENTIAL_BINDINGS"/);
   assert.match(docs, /Microsoft/);
   assert.match(docs, /Gravitee/);
   assert.match(docs, /KrakenD/);
