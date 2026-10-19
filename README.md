@@ -54,7 +54,7 @@ The [30-source review](docs/research-review.md) records findings from 20 enginee
 
 ## Try it locally
 
-For the first AWS-hosted public demonstration, see the [AWS demo guide](docs/aws-demo.md). It uses a one-instance App Runner echo service and a CloudFront-hosted static site; its $10 monthly AWS Budget sends warnings and does not automatically stop billing.
+For the first AWS-hosted public demonstration, see the [AWS demo guide](docs/aws-demo.md). It uses a one-instance App Runner echo service and a CloudFront-hosted static site. No AWS budget alert is configured; monitor spending in Billing and Cost Management.
 
 
 

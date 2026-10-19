@@ -12,16 +12,14 @@ foreach ($tool in @('aws', 'docker', 'node', 'npm')) {
   if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "Required tool not found: $tool" }
 }
 if ($WhatIfPreference) {
-  Write-Host "Plan: build the public echo container; create/update stack '$StackName' in $Region; configure a `$10 monthly budget alert; publish the static site; enable the gateway host allowlist. No cloud resources were changed."
+  Write-Host "Plan: build the public echo container; create/update stack '$StackName' in $Region; publish the static site; enable the gateway host allowlist. No cloud resources were changed."
   return
 }
 
 $null = aws sts get-caller-identity --region $Region 2>$null
 if ($LASTEXITCODE -ne 0) { throw 'AWS sign-in was not available for this profile. Configure AWS CLI credentials with IAM Identity Center or a named profile, then retry.' }
 $owner = Read-Host 'GitHub account or organization that owns relay-mcp-gateway'
-$budgetEmail = Read-Host 'Email for the $10 monthly spend warning'
 if (-not $owner -or $owner -notmatch '^[A-Za-z0-9-]+$') { throw 'Enter a valid GitHub owner.' }
-if (-not $budgetEmail -or $budgetEmail -notmatch '^[^\s@]+@[^\s@]+\.[^\s@]+$') { throw 'Enter a valid budget notification email.' }
 
 $accountId = aws sts get-caller-identity --query Account --output text --region $Region
 $registry = "$accountId.dkr.ecr.$Region.amazonaws.com"
@@ -59,15 +57,15 @@ if ($provider) {
 }
 
 $template = Join-Path $PSScriptRoot 'template.yaml'
-$baseParameters = @("ImageUri=$imageUri", "GitHubOwner=$owner", 'GitHubRepository=relay-mcp-gateway', "GitHubOidcProviderArn=$providerArn", "BudgetEmail=$budgetEmail", 'GatewayAllowedHosts=')
-if (-not $PSCmdlet.ShouldProcess("AWS $Region / $StackName", 'Create the public Relay demo, static website, and $10 monthly budget alert')) { return }
+$baseParameters = @("ImageUri=$imageUri", "GitHubOwner=$owner", 'GitHubRepository=relay-mcp-gateway', "GitHubOidcProviderArn=$providerArn", 'GatewayAllowedHosts=')
+if (-not $PSCmdlet.ShouldProcess("AWS $Region / $StackName", 'Create the public Relay demo and static website')) { return }
 aws cloudformation deploy --template-file $template --stack-name $StackName --capabilities CAPABILITY_NAMED_IAM --region $Region --parameter-overrides $baseParameters
 if ($LASTEXITCODE -ne 0) { throw 'CloudFormation failed while creating the AWS demo stack.' }
 
 $endpoint = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='McpEndpoint'].OutputValue | [0]" --output text
 if ($LASTEXITCODE -ne 0 -or -not $endpoint.StartsWith('https://')) { throw 'Could not read the App Runner MCP endpoint.' }
 $allowedHost = ([uri]$endpoint).Host
-$finalParameters = @("ImageUri=$imageUri", "GitHubOwner=$owner", 'GitHubRepository=relay-mcp-gateway', "GitHubOidcProviderArn=$providerArn", "BudgetEmail=$budgetEmail", "GatewayAllowedHosts=$allowedHost")
+$finalParameters = @("ImageUri=$imageUri", "GitHubOwner=$owner", 'GitHubRepository=relay-mcp-gateway', "GitHubOidcProviderArn=$providerArn", "GatewayAllowedHosts=$allowedHost")
 aws cloudformation deploy --template-file $template --stack-name $StackName --capabilities CAPABILITY_NAMED_IAM --region $Region --parameter-overrides $finalParameters
 if ($LASTEXITCODE -ne 0) { throw 'Could not apply the generated App Runner hostname allowlist.' }
 
@@ -101,5 +99,5 @@ Write-Host "APP_RUNNER_SERVICE_ARN=$serviceArn"
 Write-Host "WEBSITE_BUCKET=$bucket"
 Write-Host "CLOUDFRONT_DISTRIBUTION_ID=$distribution"
 Write-Host "RELAY_MCP_ENDPOINT=$endpoint"
-Write-Host "Monthly spend warning: `$10 (notifications to $budgetEmail; this is not an automatic shutdown)."
+Write-Host 'AWS budget email alerts are not configured. Monitor spending in Billing and Cost Management.'
 Write-Host 'The public demo key only grants the echo tool.'

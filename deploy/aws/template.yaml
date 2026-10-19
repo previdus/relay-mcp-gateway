@@ -14,10 +14,6 @@ Parameters:
   GitHubOidcProviderArn:
     Type: String
     Description: AWS IAM OIDC provider ARN for https://token.actions.githubusercontent.com.
-  BudgetEmail:
-    Type: String
-    Description: Email that receives AWS budget warnings.
-    AllowedPattern: '^[^\s@]+@[^\s@]+\.[^\s@]+$'
   GatewayAllowedHosts:
     Type: String
     Default: ''
@@ -245,34 +241,6 @@ Resources:
               - Effect: Allow
                 Action: cloudfront:CreateInvalidation
                 Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${WebsiteDistribution}'
-
-  DemoBudget:
-    Type: AWS::Budgets::Budget
-    Properties:
-      Budget:
-        BudgetName: !Sub '${AWS::StackName}-monthly-warning'
-        BudgetLimit:
-          Amount: 10
-          Unit: USD
-        TimeUnit: MONTHLY
-        BudgetType: COST
-      NotificationsWithSubscribers:
-        - Notification:
-            NotificationType: ACTUAL
-            ComparisonOperator: GREATER_THAN
-            Threshold: 80
-            ThresholdType: PERCENTAGE
-          Subscribers:
-            - SubscriptionType: EMAIL
-              Address: !Ref BudgetEmail
-        - Notification:
-            NotificationType: FORECASTED
-            ComparisonOperator: GREATER_THAN
-            Threshold: 100
-            ThresholdType: PERCENTAGE
-          Subscribers:
-            - SubscriptionType: EMAIL
-              Address: !Ref BudgetEmail
 
 Outputs:
   WebsiteUrl:
