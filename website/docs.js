@@ -200,6 +200,52 @@ document.querySelectorAll('[data-copy-code]').forEach((button) => button.addEven
   }
 }));
 
+const docsFlow = document.querySelector('.docs-map-track');
+const docsFlowCaption = document.querySelector('#docs-map-caption');
+const docsSections = [...document.querySelectorAll('.doc-section[id]')];
+const docsStages = {
+  overview: ['identity', 'Start with the caller. Every later control builds on that verified identity.'],
+  local: ['operations', 'Run the local example, then inspect the same request path in the console.'],
+  configuration: ['policy', 'Choose a settings group, then open the exact fields that shape its control.'],
+  protocol: ['discovery', 'Discovery builds a bounded catalog and only reveals tools the caller may see.'],
+  authentication: ['identity', 'A verified token or service key maps to one stable client identity.'],
+  authorization: ['policy', 'Grants and contextual policy decide what the identified caller can do.'],
+  routing: ['routing', 'A public tool alias resolves only to eligible, administrator-approved targets.'],
+  secrets: ['credential', 'The gateway checks the destination binding before resolving a credential.'],
+  resilience: ['operations', 'Deadlines, quotas and limits bound the work before it reaches an upstream.'],
+  plugins: ['operations', 'Typed extension points let operators change a layer while retaining the gateway boundary.'],
+  admin: ['operations', 'A reviewed configuration revision becomes the snapshot used by requests.'],
+  deploy: ['operations', 'The platform supplies shared state, ingress, secret delivery and egress controls.'],
+  comparison: ['operations', 'Compare products by the job each one is built to perform.'],
+  readiness: ['operations', 'Repository tests are one input; deployment checks and open validation still matter.']
+};
+function setDocsStage(sectionId) {
+  const stage = docsStages[sectionId];
+  if (!stage || !docsFlow) return;
+  docsFlow.querySelectorAll('[data-doc-step]').forEach((node) => {
+    const active = node.dataset.docStep === stage[0];
+    node.classList.toggle('active', active);
+    if (active) node.setAttribute('aria-current', 'step');
+    else node.removeAttribute('aria-current');
+  });
+  if (docsFlowCaption) docsFlowCaption.textContent = stage[1];
+  document.querySelectorAll('.docs-toc a').forEach((link) => {
+    const active = link.getAttribute('href') === `#${sectionId}`;
+    link.classList.toggle('active', active);
+    if (active) link.setAttribute('aria-current', 'location');
+    else link.removeAttribute('aria-current');
+  });
+}
+document.querySelectorAll('.docs-toc a').forEach((link) => link.addEventListener('click', () => setDocsStage(link.hash.slice(1))));
+if (docsSections.length && 'IntersectionObserver' in window) {
+  const sectionObserver = new IntersectionObserver((entries) => {
+    const current = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+    if (current) setDocsStage(current.target.id);
+  }, { rootMargin: '-18% 0px -68% 0px', threshold: [0, .2, .5] });
+  docsSections.forEach((section) => sectionObserver.observe(section));
+}
+if (location.hash && docsStages[location.hash.slice(1)]) setDocsStage(location.hash.slice(1));
+
 const nav = document.querySelector('#site-nav');
 const menuButton = document.querySelector('.menu-toggle');
 menuButton?.addEventListener('click', () => {

@@ -11,6 +11,7 @@ test('website build contains a product story, sourced comparison and complete do
   const css = await readFile(resolve(root, 'website/dist/styles.css'), 'utf8');
   const siteJs = await readFile(resolve(root, 'website/dist/site.js'), 'utf8');
   const docsJs = await readFile(resolve(root, 'website/dist/docs.js'), 'utf8');
+  const visuals = await readFile(resolve(root, 'website/dist/visuals.css'), 'utf8');
   assert.match(html, /class="hero-visual reveal"/);
   assert.match(html, /id="security"/);
   assert.match(html, /id="deploy"/);
@@ -21,7 +22,11 @@ test('website build contains a product story, sourced comparison and complete do
   assert.match(html, /id="hosted-mcp-link"/);
   assert.match(html, /data-cap="authorization"/);
   assert.match(html, /Relay’s strongest case/);
+  for (const visual of ['value-journey', 'cap-map', 'secret-branch', 'compare-flow', 'deployment-map', 'quick-steps', 'proof-path', 'community-orbit']) {
+    assert.match(html, new RegExp(visual), `homepage includes its ${visual} explainer`);
+  }
   assert.match(docs, /id="configuration"/);
+  assert.match(docs, /docs-request-map/);
   assert.match(docs, /id="authentication"/);
   assert.match(docs, /id="authorization"/);
   assert.match(docs, /id="routing"/);
@@ -50,17 +55,23 @@ test('website build contains a product story, sourced comparison and complete do
   assert.match(docs, /KrakenD/);
   assert.match(siteJs, /ArrowRight/);
   assert.match(siteJs, /prefers-reduced-motion/);
+  for (const mode of ['protocol', 'identity', 'authorization', 'routing', 'security', 'operations']) {
+    assert.match(siteJs, new RegExp(`${mode}: \\{[\\s\\S]*?flow:`), `${mode} updates the capability flow map`);
+  }
   assert.match(docsJs, /config-search/);
   assert.match(docsJs, /data-copy-code/);
   assert.match(docsJs, /showConfigScenario/);
   assert.match(docsJs, /selectConfigGroup/);
   assert.match(docsJs, /dataset\.settingGroup/);
   assert.match(docsJs, /withholds the credential/);
+  assert.match(docsJs, /setDocsStage/);
   assert.match(css, /@media\(max-width:(?:560|600)px\)/);
   assert.match(css, /focus-visible/);
   assert.match(css, /config-flow-node\[data-state=denied\]/);
   assert.match(css, /@keyframes route-flow/);
   assert.match(css, /@keyframes map-pulse/);
+  assert.match(visuals, /@media\(prefers-reduced-motion:reduce\)/);
+  assert.match(visuals, /@keyframes docs-map-flow/);
   await access(resolve(root, 'website/dist/README.md'));
   await access(resolve(root, 'website/dist/docs/coverage.md'));
 });

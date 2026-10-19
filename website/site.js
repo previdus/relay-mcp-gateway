@@ -5,6 +5,7 @@ const capabilityDetails = {
     modes: ['Streamable HTTP and stateless legacy requests', 'Legacy HTTP+SSE upstream adapter and trusted stdio transport', 'Optional prompts, resources, templates, completion, callbacks, notifications and Tasks V2', 'Bounded discovery, opaque pagination and optional literal catalog search'],
     example: 'tools/list → echo, docs__search\n\n# Stable aliases are administrator-defined\necho → samples.echo',
     boundary: 'Relay implements the capabilities shown in its coverage guide. Optional protocol extensions must be enabled and tested with your client.',
+    flow: ['Agent', 'MCP client', 'Relay catalog', 'Allowed tools', 'MCP server'], focus: 2, caption: 'Protocol negotiation carries a permission-filtered catalog to the client.',
     link: 'docs.html#protocol'
   },
   identity: {
@@ -13,6 +14,7 @@ const capabilityDetails = {
     modes: ['Per-client service keys', 'JWT/OAuth issuer, audience and JWKS validation', 'Opaque token introspection with bounded timeouts', 'Gateway-terminated mTLS certificate mapping, DPoP checks and optional token exchange'],
     example: 'mode: jwt\nissuer: https://id.example/tenant\naudience: relay-tools\nrequiredScopes: [mcp.invoke]',
     boundary: 'Relay validates tokens; your identity provider remains responsible for login, MFA, user lifecycle, issuance and signing key protection.',
+    flow: ['Agent token', 'Verifier', 'Client identity', 'Policy context', 'Catalog'], focus: 1, caption: 'The verifier resolves one caller identity before discovery or authorization.',
     link: 'docs.html#authentication'
   },
   authorization: {
@@ -21,6 +23,7 @@ const capabilityDetails = {
     modes: ['Exact tool grants and constrained namespace wildcards', 'Roles, tenant and resource context', 'OpenFGA relationship checks and OPA policy adapter', 'Argument constraints, target pins, quotas and optional human approval'],
     example: 'client: analyst\nallow: [search, docs__*]\ntenant: team-a\nmaxCallsPerMinute: 60',
     boundary: 'External policy services are deployment dependencies. Configure timeouts and fail-closed behavior; test the policies with your own identity model.',
+    flow: ['Caller', 'Tool grant', 'Role + tenant', 'OPA / OpenFGA', 'Decision'], focus: 3, caption: 'Independent checks narrow access; a later policy cannot widen the caller grant.',
     link: 'docs.html#authorization'
   },
   routing: {
@@ -29,6 +32,7 @@ const capabilityDetails = {
     modes: ['Direct namespace and stable aliases', 'Sticky, weighted, priority and weighted rendezvous selection', 'Tenant selectors and constrained remote selector plugin', 'Per-upstream deadlines, bounded concurrency, circuit state and explicit retries only when safe'],
     example: 'route: search\nstrategy: weighted\ntargets: [primary: 90, canary: 10]\ntimeoutMs: 8000\nretry: disabled by default',
     boundary: 'Tool calls can have side effects. Relay does not blindly replay failed calls; retry safety belongs to the tool contract and operator policy.',
+    flow: ['Tool alias', 'Eligible pool', 'Route strategy', 'Selected target', 'MCP server'], focus: 2, caption: 'Routing selects from administrator-defined candidates after tenant and policy filters.',
     link: 'docs.html#routing'
   },
   security: {
@@ -37,6 +41,7 @@ const capabilityDetails = {
     modes: ['Separate inbound agent and upstream service identities', 'Exact URL, path and purpose bindings for each credential reference', 'DNS answer validation and strict egress checks', 'Private CIDR allowlists, origin checks and metadata-only audit events'],
     example: 'reference: DOCS_TOKEN\nallowedUrl: https://docs.example/api\npurpose: bearer-auth\nstrictBindings: true',
     boundary: 'Network controls and secret delivery are deployment responsibilities. Protect credentials in logs, crash dumps, CI, backups and operator workflows too.',
+    flow: ['Secret ref', 'Destination bind', 'Egress check', 'Secret resolver', 'Approved host'], focus: 1, caption: 'Relay checks the exact destination before resolving a credential reference.',
     link: 'docs.html#secrets'
   },
   operations: {
@@ -45,6 +50,7 @@ const capabilityDetails = {
     modes: ['Admin API and browser configuration UI', 'In-memory demo state or PostgreSQL shared state', 'OpenTelemetry traces, health/readiness and protected metrics', 'Typed component contracts for auth, policy, router, transport, storage and quotas'],
     example: 'local: npm run demo\nshared state: DATABASE_URL=postgres://…\nhealth: /health /ready',
     boundary: 'Plugin contracts support composition but are not a sandbox. Run trusted plugins in a separately isolated process and apply platform resource and network limits.',
+    flow: ['Admin draft', 'Schema check', 'Publish revision', 'Gateway replicas', 'Audit + metrics'], focus: 2, caption: 'A published revision is the boundary between reviewed configuration and request handling.',
     link: 'docs.html#admin'
   }
 };
@@ -85,6 +91,36 @@ function selectCapability(key, focus = false) {
   });
   const list = (items) => items.map((item) => `<li>${item}</li>`).join('');
   panel.innerHTML = `<div class="cap-panel-top"><span class="cap-tag">${detail.tag}</span><span class="cap-status"><i></i> IMPLEMENTED · SEE COVERAGE</span></div><h3>${detail.title}</h3><p class="cap-summary">${detail.summary}</p><div class="cap-detail-grid"><div><h4>Modes</h4><ul>${list(detail.modes)}</ul></div><div><h4>Example</h4><pre class="mini-code"><code>${detail.example}</code></pre></div></div><div class="cap-boundary"><b>Plan for</b><span>${detail.boundary}</span></div><a class="cap-doc-link" href="${detail.link}">Open detailed configuration guide <span>↗</span></a>`;
+  const mapWrap = document.createElement('div');
+  mapWrap.className = 'cap-map-wrap';
+  const mapKicker = document.createElement('span');
+  mapKicker.className = 'cap-map-kicker';
+  mapKicker.textContent = 'WHERE THIS CONTROL SITS';
+  const map = document.createElement('div');
+  map.id = 'cap-map';
+  map.className = 'cap-map';
+  map.setAttribute('role', 'img');
+  const mapCaption = document.createElement('p');
+  mapCaption.className = 'cap-map-caption';
+  mapCaption.id = 'cap-map-caption';
+  mapCaption.setAttribute('aria-live', 'polite');
+  mapWrap.append(mapKicker, map, mapCaption);
+  panel.querySelector('.cap-detail-grid')?.before(mapWrap);
+  if (map) {
+    map.replaceChildren();
+    map.setAttribute('aria-label', detail.flow.join(' then '));
+    const line = document.createElement('i'); line.className = 'cap-map-line'; map.append(line);
+    const traveler = document.createElement('i'); traveler.className = 'cap-map-traveler'; map.append(traveler);
+    detail.flow.forEach((step, index) => {
+      const node = document.createElement('span');
+      node.className = `cap-map-node${index === detail.focus ? ' is-focus' : ''}`;
+      node.textContent = step;
+      map.append(node);
+    });
+    map.classList.remove('is-changing');
+    if (!reduceMotion) { void map.offsetWidth; map.classList.add('is-changing'); }
+    mapCaption.textContent = detail.caption;
+  }
   panel.setAttribute('aria-labelledby', tabs.find((tab) => tab.dataset.cap === key)?.id ?? '');
   if (focus) panel.focus();
 }
