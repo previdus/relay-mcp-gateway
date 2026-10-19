@@ -12,7 +12,7 @@ foreach ($tool in @('aws', 'docker', 'node', 'npm')) {
   if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "Required tool not found: $tool" }
 }
 if ($WhatIfPreference) {
-  Write-Host "Plan: build the public echo container; create/update stack '$StackName' in $Region; configure a $10 monthly budget alert; publish the static site; enable the gateway host allowlist. No cloud resources were changed."
+  Write-Host "Plan: build the public echo container; create/update stack '$StackName' in $Region; configure a `$10 monthly budget alert; publish the static site; enable the gateway host allowlist. No cloud resources were changed."
   return
 }
 
@@ -101,5 +101,5 @@ Write-Host "APP_RUNNER_SERVICE_ARN=$serviceArn"
 Write-Host "WEBSITE_BUCKET=$bucket"
 Write-Host "CLOUDFRONT_DISTRIBUTION_ID=$distribution"
 Write-Host "RELAY_MCP_ENDPOINT=$endpoint"
-Write-Host "Monthly spend warning: $10 (notifications to $budgetEmail; this is not an automatic shutdown)."
+Write-Host "Monthly spend warning: `$10 (notifications to $budgetEmail; this is not an automatic shutdown)."
 Write-Host 'The public demo key only grants the echo tool.'
