@@ -97,11 +97,15 @@ Resources:
             Port: '3000'
             StartCommand: node dist/cloud-demo.js
             RuntimeEnvironmentVariables:
-              HOST: 0.0.0.0
-              DEMO_TOKEN: relay-public-echo-demo-token
-              GATEWAY_ALLOWED_HOSTS: !Ref GatewayAllowedHosts
+              - Name: HOST
+                Value: 0.0.0.0
+              - Name: DEMO_TOKEN
+                Value: relay-public-echo-demo-token
+              - Name: GATEWAY_ALLOWED_HOSTS
+                Value: !Ref GatewayAllowedHosts
             RuntimeEnvironmentSecrets:
-              GATEWAY_ADMIN_KEY: !Ref GatewayAdminSecret
+              - Name: GATEWAY_ADMIN_KEY
+                Value: !Ref GatewayAdminSecret
       AutoScalingConfigurationArn: !GetAtt DemoAutoScaling.AutoScalingConfigurationArn
       HealthCheckConfiguration:
         Protocol: HTTP
@@ -173,9 +177,9 @@ Resources:
         Restrictions:
           GeoRestriction:
             RestrictionType: none
-        Tags:
-          - Key: Project
-            Value: relay-mcp-gateway-demo
+      Tags:
+        - Key: Project
+          Value: relay-mcp-gateway-demo
 
   WebsiteBucketPolicy:
     Type: AWS::S3::BucketPolicy
