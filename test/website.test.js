@@ -38,6 +38,13 @@ test('website build contains a product story, sourced comparison and complete do
   assert.match(docs, /This is an explanatory prototype/);
   assert.match(docs, /20 settings/);
   assert.match(docs, /data-setting-search="GATEWAY_CREDENTIAL_BINDINGS"/);
+  for (const group of ['identity', 'permissions', 'upstreams', 'routing', 'runtime']) {
+    assert.match(docs, new RegExp(`data-group="${group}"`));
+  }
+  const configTable = docs.match(/<table class="doc-table" id="config-table">[\s\S]*?<\/table>/)?.[0];
+  const groupedRows = [...(configTable ?? '').matchAll(/<tr data-setting-group="([^"]+)"/g)];
+  assert.equal(groupedRows.length, 20, 'every configuration row belongs to one explorable group');
+  assert.deepEqual([...new Set(groupedRows.map((row) => row[1]))].sort(), ['identity', 'permissions', 'routing', 'runtime', 'upstreams']);
   assert.match(docs, /Microsoft/);
   assert.match(docs, /Gravitee/);
   assert.match(docs, /KrakenD/);
@@ -46,11 +53,14 @@ test('website build contains a product story, sourced comparison and complete do
   assert.match(docsJs, /config-search/);
   assert.match(docsJs, /data-copy-code/);
   assert.match(docsJs, /showConfigScenario/);
+  assert.match(docsJs, /selectConfigGroup/);
+  assert.match(docsJs, /dataset\.settingGroup/);
   assert.match(docsJs, /withholds the credential/);
   assert.match(css, /@media\(max-width:(?:560|600)px\)/);
   assert.match(css, /focus-visible/);
   assert.match(css, /config-flow-node\[data-state=denied\]/);
   assert.match(css, /@keyframes route-flow/);
+  assert.match(css, /@keyframes map-pulse/);
   await access(resolve(root, 'website/dist/README.md'));
   await access(resolve(root, 'website/dist/docs/coverage.md'));
 });
