@@ -77,7 +77,6 @@ Resources:
   DemoAutoScaling:
     Type: AWS::AppRunner::AutoScalingConfiguration
     Properties:
-      AutoScalingConfigurationName: !Sub '${AWS::StackName}-scaling'
       MaxConcurrency: 30
       MinSize: 1
       MaxSize: 1
