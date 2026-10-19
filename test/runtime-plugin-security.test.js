@@ -7,6 +7,19 @@ import { createRuntime } from '../dist/runtime.js';
 import { createModernDemoServer } from '../dist/demo-modern.js';
 import { listen, serviceToken, adminToken } from './helpers.js';
 
+test('health checks work before a cloud hostname is assigned while gateway routes still enforce the host allow-list', async t => {
+  const store = new SqliteStore(':memory:', { allowLocalHttp: true, clients: [{ id: 'health-probe', tokenEnv: 'SERVICE_TOKEN', allow: ['never'] }], upstreams: [] });
+  t.after(() => store.close());
+  const gatewayUrl = await listen(createRuntime(store, { adminKey: adminToken, environment: {}, allowedHosts: ['gateway.example'] }), t);
+
+  const health = await fetch(`${gatewayUrl}/healthz`, { headers: { Host: 'internal-load-balancer.local' } });
+  assert.equal(health.status, 200);
+  assert.deepEqual(await health.json(), { status: 'ok' });
+
+  const admin = await fetch(`${gatewayUrl}/admin/`, { headers: { Host: 'internal-load-balancer.local' } });
+  assert.notEqual(admin.status, 200, 'normal routes remain protected by host validation');
+});
+
 test('an injected authorizer adds restrictions and cannot replace deployment allow-list or OPA policy', async t => {
   let opaDecision = false, opaChecks = 0, applicationChecks = 0;
   const opa = express(); opa.use(express.json());

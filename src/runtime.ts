@@ -213,7 +213,8 @@ export function createRuntime(store: ConfigStore, options: {
   }
   const app = express();
   app.disable('x-powered-by');
-  app.use(hostHeaderValidation(options.allowedHosts ?? ['127.0.0.1', 'localhost', '[::1]']));
+  const validateHost = hostHeaderValidation(options.allowedHosts ?? ['127.0.0.1', 'localhost', '[::1]']);
+  app.use((req, res, next) => req.path === '/healthz' ? next() : validateHost(req, res, next));
   app.use((_req, res, next) => {
     res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'", 'Cache-Control': 'no-store' });
     next();
