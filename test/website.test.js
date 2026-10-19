@@ -32,6 +32,10 @@ test('website build contains a product story, sourced comparison and complete do
   assert.match(docs, /id="cloud"/);
   assert.match(docs, /id="readiness"/);
   assert.match(docs, /config-search/);
+  assert.match(docs, /config-lab/);
+  assert.match(docs, /data-config-scenario="blocked"/);
+  assert.match(docs, /data-config-step="destination"/);
+  assert.match(docs, /This is an explanatory prototype/);
   assert.match(docs, /Microsoft/);
   assert.match(docs, /Gravitee/);
   assert.match(docs, /KrakenD/);
@@ -39,8 +43,12 @@ test('website build contains a product story, sourced comparison and complete do
   assert.match(siteJs, /prefers-reduced-motion/);
   assert.match(docsJs, /config-search/);
   assert.match(docsJs, /data-copy-code/);
+  assert.match(docsJs, /showConfigScenario/);
+  assert.match(docsJs, /withholds the credential/);
   assert.match(css, /@media\(max-width:(?:560|600)px\)/);
   assert.match(css, /focus-visible/);
+  assert.match(css, /config-flow-node\[data-state=denied\]/);
+  assert.match(css, /@keyframes route-flow/);
   await access(resolve(root, 'website/dist/README.md'));
   await access(resolve(root, 'website/dist/docs/coverage.md'));
 });

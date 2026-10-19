@@ -33,7 +33,7 @@ deployTabs.forEach((tab, index) => {
 const search = document.querySelector('#config-search');
 const searchCount = document.querySelector('#config-search-count');
 const configRows = [...document.querySelectorAll('#config-table tbody tr')];
-search?.addEventListener('input', () => {
+function filterConfigRows() {
   const query = search.value.trim().toLocaleLowerCase();
   let shown = 0;
   configRows.forEach((row) => {
@@ -42,7 +42,48 @@ search?.addEventListener('input', () => {
     if (visible) shown += 1;
   });
   if (searchCount) searchCount.textContent = `${shown} of ${configRows.length} settings`;
-});
+}
+search?.addEventListener('input', filterConfigRows);
+
+const configFlow = document.querySelector('#config-flow');
+const configOutcome = document.querySelector('#config-lab-outcome');
+const scenarios = [...document.querySelectorAll('[data-config-scenario]')];
+function showConfigScenario(scenario) {
+  const blocked = scenario === 'blocked';
+  scenarios.forEach((button) => {
+    const active = button.dataset.configScenario === scenario;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  configFlow?.classList.toggle('blocked', blocked);
+  configFlow?.setAttribute('data-result', scenario);
+  configFlow?.querySelectorAll('[data-config-step]').forEach((step, index) => {
+    const state = blocked && index === 3 ? 'denied' : blocked && index === 4 ? 'pending' : 'passed';
+    step.dataset.state = state;
+    const icon = step.querySelector('.config-node-icon');
+    if (icon) icon.textContent = state === 'denied' ? '×' : state === 'pending' ? '·' : ['◉', '✓', '⇄', '⛨', '▦'][index];
+  });
+  if (configOutcome) {
+    configOutcome.classList.toggle('denied', blocked);
+    configOutcome.querySelector('.outcome-icon').textContent = blocked ? '×' : '✓';
+    configOutcome.querySelector('b').textContent = blocked
+      ? 'Blocked: Relay withholds the credential before forwarding.'
+      : 'Allowed: the request reaches its approved target.';
+    configOutcome.querySelector('p span').textContent = blocked
+      ? 'The route points to an unapproved host. Strict destination binding rejects the mismatch before Relay resolves or sends the upstream secret.'
+      : 'Relay identifies the caller, confirms the tool grant, selects an administrator-defined route and sends the credential only to its bound host.';
+  }
+}
+scenarios.forEach((button) => button.addEventListener('click', () => showConfigScenario(button.dataset.configScenario)));
+showConfigScenario('allowed');
+
+document.querySelectorAll('[data-setting-search]').forEach((button) => button.addEventListener('click', () => {
+  if (!search) return;
+  search.value = button.dataset.settingSearch;
+  filterConfigRows();
+  search.focus();
+  search.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+}));
 
 document.querySelectorAll('[data-copy-code]').forEach((button) => button.addEventListener('click', async () => {
   const code = button.parentElement?.querySelector('code')?.innerText;
