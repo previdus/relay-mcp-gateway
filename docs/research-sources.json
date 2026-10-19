@@ -1,0 +1,221 @@
+{
+  "review_date": "2026-10-17",
+  "article_count": 20,
+  "paper_count": 10,
+  "sources": [
+    {
+      "id": "A01",
+      "kind": "article",
+      "title": "Writing effective tools for agents",
+      "url": "https://www.anthropic.com/engineering/writing-tools-for-agents",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A02",
+      "kind": "article",
+      "title": "Code execution with MCP",
+      "url": "https://www.anthropic.com/engineering/code-execution-with-mcp",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A03",
+      "kind": "article",
+      "title": "Introducing advanced tool use",
+      "url": "https://www.anthropic.com/engineering/advanced-tool-use",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A04",
+      "kind": "article",
+      "title": "Effective context engineering for AI agents",
+      "url": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A05",
+      "kind": "article",
+      "title": "Building effective agents",
+      "url": "https://www.anthropic.com/research/building-effective-agents",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A06",
+      "kind": "article",
+      "title": "Demystifying evals for AI agents",
+      "url": "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A07",
+      "kind": "article",
+      "title": "Effective harnesses for long-running agents",
+      "url": "https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A08",
+      "kind": "article",
+      "title": "Code Mode: the better way to use MCP",
+      "url": "https://blog.cloudflare.com/code-mode/",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A09",
+      "kind": "article",
+      "title": "How Cloudflare detects MCP traffic and helps secure it",
+      "url": "https://blog.cloudflare.com/mcp-security-updates/",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A10",
+      "kind": "article",
+      "title": "Docker MCP Gateway: secure infrastructure for agentic AI",
+      "url": "https://www.docker.com/blog/docker-mcp-gateway-secure-infrastructure-for-agentic-ai/",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A11",
+      "kind": "article",
+      "title": "MCP Security: risks, challenges, and mitigation",
+      "url": "https://www.docker.com/blog/mcp-security-explained/",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A12",
+      "kind": "article",
+      "title": "Jumping the line",
+      "url": "https://blog.trailofbits.com/2025/04/21/jumping-the-line-how-mcp-servers-can-attack-you-before-you-ever-use-them/",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A13",
+      "kind": "article",
+      "title": "Insecure credential storage plagues MCP",
+      "url": "https://blog.trailofbits.com/2025/04/30/insecure-credential-storage-plagues-mcp/",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A14",
+      "kind": "article",
+      "title": "Deceiving users with ANSI terminal codes in MCP",
+      "url": "https://blog.trailofbits.com/2025/04/29/deceiving-users-with-ansi-terminal-codes-in-mcp/",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A15",
+      "kind": "article",
+      "title": "MCP Security Notification: Tool Poisoning Attacks",
+      "url": "https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A16",
+      "kind": "article",
+      "title": "Toxic flow analysis",
+      "url": "https://invariantlabs.ai/blog/toxic-flow-analysis",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A17",
+      "kind": "article",
+      "title": "Timeouts, retries, and backoff with jitter",
+      "url": "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A18",
+      "kind": "article",
+      "title": "Making retries safe with idempotent APIs",
+      "url": "https://d1.awsstatic.com/builderslibrary/pdfs/making-retries-safe-with-idempotent-apis-malcolm-featonby.pdf",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A19",
+      "kind": "article",
+      "title": "Secure a C# MCP Server with Auth0",
+      "url": "https://auth0.com/blog/secure-csharp-mcp-server-with-auth0/",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "A20",
+      "kind": "article",
+      "title": "MCP Server Mediation: Securing Third-Party MCP Connections",
+      "url": "https://www.gravitee.io/blog/mcp-server-mediation-securing-third-party-mcp-connections",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "P01",
+      "kind": "paper",
+      "title": "Zanzibar: Google’s Consistent, Global Authorization System",
+      "url": "https://www.usenix.org/system/files/atc19-pang.pdf",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "P02",
+      "kind": "paper",
+      "title": "The Protection of Information in Computer Systems",
+      "url": "https://web.mit.edu/Saltzer/www/publications/protection/",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations",
+      "body_urls": [
+        "https://web.mit.edu/Saltzer/www/publications/protection/Basic.html",
+        "https://web.mit.edu/Saltzer/www/publications/protection/Descriptors.html"
+      ]
+    },
+    {
+      "id": "P03",
+      "kind": "paper",
+      "title": "Not what you’ve signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection",
+      "url": "https://arxiv.org/html/2302.12173v2",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "P04",
+      "kind": "paper",
+      "title": "InjecAgent: Benchmarking Indirect Prompt Injections in Tool-Integrated Large Language Model Agents",
+      "url": "https://arxiv.org/html/2403.02691v2",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "P05",
+      "kind": "paper",
+      "title": "AgentDojo: A Dynamic Environment to Evaluate Attacks and Defenses for LLM Agents",
+      "url": "https://arxiv.org/html/2406.13352v1",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "P06",
+      "kind": "paper",
+      "title": "Identifying the Risks of LM Agents with an LM-Emulated Sandbox (ToolEmu)",
+      "url": "https://arxiv.org/html/2309.15817v2",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "P07",
+      "kind": "paper",
+      "title": "Defeating Prompt Injections by Design (CaMeL)",
+      "url": "https://arxiv.org/html/2503.18813v1",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "P08",
+      "kind": "paper",
+      "title": "Progent: Programmable Privilege Control for LLM Agents",
+      "url": "https://arxiv.org/html/2504.11703v2",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "P09",
+      "kind": "paper",
+      "title": "AgentSpec: Customizable Runtime Enforcement for Safe and Reliable LLM Agents",
+      "url": "https://arxiv.org/html/2503.18666v3",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    },
+    {
+      "id": "P10",
+      "kind": "paper",
+      "title": "ReAct: Synergizing Reasoning and Acting in Language Models",
+      "url": "https://arxiv.org/html/2210.03629v3",
+      "reviewed": "Substantive full-text body sections; see annotated review for scope and limitations"
+    }
+  ]
+}

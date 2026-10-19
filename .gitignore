@@ -1,0 +1,7 @@
+node_modules/
+.env
+data/
+coverage/
+dist/
+website/dist/
+.browser-tmp/

@@ -1,0 +1,49 @@
+# Disposable validation dependency. Apply only in a dedicated test namespace.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: relay-test-postgres }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 1Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: relay-test-postgres }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: relay-test-postgres }
+  template:
+    metadata:
+      labels: { app: relay-test-postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          env:
+            - { name: POSTGRES_USER, value: gateway }
+            - { name: POSTGRES_DB, value: gateway }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: relay-gateway-secrets, key: POSTGRES_PASSWORD }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: '1', memory: 512Mi }
+          readinessProbe:
+            exec: { command: [pg_isready, -U, gateway, -d, gateway] }
+            periodSeconds: 2
+          volumeMounts:
+            - { name: database, mountPath: /var/lib/postgresql/data }
+      volumes:
+        - name: database
+          persistentVolumeClaim: { claimName: relay-test-postgres }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: relay-test-postgres }
+spec:
+  selector: { app: relay-test-postgres }
+  ports: [{ port: 5432, targetPort: 5432 }]

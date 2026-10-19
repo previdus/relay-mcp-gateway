@@ -1,0 +1,225 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import express from 'express';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { createRuntime } from '../dist/runtime.js';
+import { createGateway } from '../dist/gateway.js';
+import { createDemoServer } from '../dist/demo-server.js';
+import { createModernDemoServer } from '../dist/demo-modern.js';
+import { SqliteStore, RevisionConflict } from '../dist/store.js';
+import { ConfigRouter, OpenFgaAuthorizer, RoleAuthorizer, AllOfAuthorizer, AllowListAuthorizer, JwtAuthenticator } from '../dist/plugins.js';
+import { generateKeyPair, SignJWT, exportJWK, createLocalJWKSet } from 'jose';
+import { listen, document, serviceToken, adminToken } from './helpers.js';
+
+async function connect(url, t, mode = 'auto') {
+  const client = new Client({ name: 'product-test', version: '1' }, { versionNegotiation: { mode } });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${serviceToken}` } } }));
+  t.after(() => client.close());
+  return client;
+}
+test('modern 2026 protocol discovery and alias routing with a legacy upstream', async t => {
+  const upstream = await listen(createDemoServer('alpha'), t);
+  const config = { ...document, clients: [{ id: 'user1', token: serviceToken, allow: ['echo'] }], upstreams: [{ id: 'alpha', url: `${upstream}/mcp` }], routes: [{ name: 'echo', strategy: 'sticky', targets: [{ upstreamId: 'alpha', tool: 'echo' }] }] };
+  const url = await listen(createGateway(config), t);
+  const client = await connect(url, t, { pin: '2026-07-28' });
+  assert.equal(client.getProtocolEra(), 'modern');
+  assert.equal(client.getNegotiatedProtocolVersion(), '2026-07-28');
+  assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ['echo']);
+  assert.equal((await client.callTool({ name: 'echo', arguments: { text: 'modern' } })).content[0].text, 'alpha: modern');
+});
+test('SDK rejects mismatched modern headers and unsupported versions', async t => {
+  const url = await listen(createGateway({ ...document, clients: [{ id: 'user1', token: serviceToken, allow: [] }] }), t);
+  const body = { jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {} } } };
+  const headers = { Authorization: `Bearer ${serviceToken}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call' };
+  const response = await fetch(`${url}/mcp`, { method: 'POST', headers, body: JSON.stringify(body) });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error.code, -32020);
+  const unsupported = await fetch(`${url}/mcp`, { method: 'POST', headers: { ...headers, 'Mcp-Method': 'tools/list', 'MCP-Protocol-Version': '2099-01-01' }, body: JSON.stringify({ ...body, params: { _meta: { ...body.params._meta, 'io.modelcontextprotocol/protocolVersion': '2099-01-01' } } }) });
+  assert.equal(unsupported.status, 400);
+  assert.equal((await unsupported.json()).error.code, -32022);
+});
+test('2026 gateway list responses advertise conservative private cache hints and legacy responses omit modern fields', async t => {
+  const url = await listen(createGateway({ ...document, clients: [{ id: 'user1', token: serviceToken, allow: [] }] }), t);
+  const modernBody = { jsonrpc: '2.0', id: 7, method: 'tools/list', params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {} } } };
+  const modern = await fetch(`${url}/mcp`, { method: 'POST', headers: { Authorization: `Bearer ${serviceToken}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/list' }, body: JSON.stringify(modernBody) });
+  const modernText = await modern.text();
+  assert.equal(modern.status, 200, modernText);
+  const modernResult = JSON.parse(modernText).result;
+  assert.equal(modernResult.resultType, 'complete');
+  assert.equal(modernResult.ttlMs, 0);
+  assert.equal(modernResult.cacheScope, 'private');
+
+  const legacy = await fetch(`${url}/mcp`, { method: 'POST', headers: { Authorization: `Bearer ${serviceToken}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-11-25', 'Mcp-Method': 'tools/list' }, body: JSON.stringify({ jsonrpc: '2.0', id: 8, method: 'tools/list' }) });
+  assert.equal(legacy.status, 200);
+  const legacyText = await legacy.text();
+  const legacyData = legacyText.split(/\r?\n/u).find(line => line.startsWith('data: '));
+  assert.ok(legacyData, 'legacy response carries a JSON-RPC data event');
+  const legacyResult = JSON.parse(legacyData.slice(6)).result;
+  assert.equal(Object.hasOwn(legacyResult, 'ttlMs'), false);
+  assert.equal(Object.hasOwn(legacyResult, 'cacheScope'), false);
+});
+test('two replicas observe configuration changes and reject stale writes', async t => {
+  const upstream = await listen(createDemoServer('alpha'), t);
+  const store = new SqliteStore(':memory:', { ...document, upstreams: [{ id: 'alpha', url: `${upstream}/mcp` }] });
+  t.after(() => store.close());
+  const options = { adminKey: adminToken, environment: { SERVICE_TOKEN: serviceToken } };
+  const first = await listen(createRuntime(store, options), t), second = await listen(createRuntime(store, options), t);
+  const headers = { Authorization: `Bearer ${adminToken}` };
+  const before = await (await fetch(`${first}/admin/api/config`, { headers })).json();
+  assert.equal(JSON.stringify(before).includes(serviceToken), false);
+  const client = await connect(second, t);
+  assert.equal((await client.listTools()).tools.length, 1);
+  const changed = { ...before.document, clients: [{ ...before.document.clients[0], allow: [] }] };
+  const save = () => fetch(`${first}/admin/api/config`, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json', 'If-Match': '"1"' }, body: JSON.stringify(changed) });
+  assert.equal((await save()).status, 200);
+  assert.equal((await save()).status, 409);
+  assert.equal((await client.listTools()).tools.length, 0);
+  await assert.rejects(client.callTool({ name: 'alpha__echo', arguments: { text: 'blocked' } }), /forbidden/);
+  const audit = await (await fetch(`${second}/admin/api/audit`, { headers })).json();
+  assert.ok(audit.some(event => event.method === 'admin/config.update'));
+  assert.ok(audit.some(event => event.outcome === 'denied'));
+  assert.equal((await fetch(`${first}/readyz`)).status, 200);
+});
+test('management API rejects service keys, cross-origin changes and invalid configuration', async t => {
+  const store = new SqliteStore(':memory:', document); t.after(() => store.close());
+  const url = await listen(createRuntime(store, { adminKey: adminToken, environment: { SERVICE_TOKEN: serviceToken } }), t);
+  assert.equal((await fetch(`${url}/admin/api/config`, { headers: { Authorization: `Bearer ${serviceToken}` } })).status, 401);
+  const headers = { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' };
+  assert.equal((await fetch(`${url}/admin/api/config`, { method: 'PUT', headers, body: '{}' })).status, 428);
+  assert.equal((await fetch(`${url}/admin/api/config`, { method: 'PUT', headers: { ...headers, 'If-Match': '"1"', Origin: 'https://evil.example' }, body: '{}' })).status, 403);
+  assert.equal((await fetch(`${url}/admin/api/config`, { method: 'PUT', headers: { ...headers, 'If-Match': '"1"' }, body: JSON.stringify({ ...document, timeoutMs: -1 }) })).status, 400);
+  assert.equal((await fetch(`${url}/admin/`)).status, 200);
+  assert.equal((await fetch(`${url}/admin/app.js`)).headers.get('content-type').includes('javascript'), true);
+});
+test('SQLite persists configuration and audit across connections with revision conflicts', async t => {
+  const { mkdtemp, rm } = await import('node:fs/promises'); const { tmpdir } = await import('node:os'); const { join } = await import('node:path');
+  const directory = await mkdtemp(join(tmpdir(), 'gateway-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, 'store.sqlite');
+  const first = new SqliteStore(path, document), second = new SqliteStore(path, document);
+  await first.write({ ...document, timeoutMs: 1000 }, 1);
+  assert.equal((await second.read()).revision, 2);
+  await assert.rejects(second.write(document, 1), RevisionConflict);
+  await first.audit({ requestId: 'test', at: new Date().toISOString(), clientId: 'user1', outcome: 'ok' });
+  await first.close(); await second.close();
+  const reopened = new SqliteStore(path, document);
+  assert.equal((await reopened.read()).document.timeoutMs, 1000);
+  assert.equal((await reopened.recentAudit()).length, 1);
+  await reopened.close();
+});
+test('relationship authorization uses pinned model and fails closed', async t => {
+  const requests = [];
+  const app = express(); app.use(express.json());
+  app.post('/stores/test/check', (req, res) => { requests.push(req.body); res.json({ allowed: req.body.tuple_key.object === 'tool:alpha__echo' }); });
+  const url = await listen(app, t);
+  const policy = new OpenFgaAuthorizer({ url, storeId: 'test', modelId: 'immutable-model', allowLocalHttp: true });
+  const principal = { id: 'user1', token: serviceToken, allow: ['alpha__*'] };
+  assert.equal(await policy.canCall(principal, 'alpha__echo'), true);
+  assert.equal(await policy.canCall(principal, 'beta__echo'), false);
+  assert.equal(requests[0].authorization_model_id, 'immutable-model');
+  assert.equal(requests[0].tuple_key.user, 'user:user1');
+  assert.equal(await new OpenFgaAuthorizer({ url, storeId: 'missing', modelId: 'model', allowLocalHttp: true }).canCall(principal, 'alpha__echo'), false);
+});
+test('roles combine with client allow lists instead of overriding them', async () => {
+  const authorizer = new AllOfAuthorizer([new AllowListAuthorizer(), new RoleAuthorizer({ reader: ['alpha__echo', 'beta__echo'] })]);
+  const principal = { id: 'user1', token: serviceToken, allow: ['alpha__*'], roles: ['reader'] };
+  assert.equal(await authorizer.canCall(principal, 'alpha__echo'), true);
+  assert.equal(await authorizer.canCall(principal, 'beta__echo'), false);
+  assert.equal(await authorizer.canCall({ ...principal, roles: [] }, 'alpha__echo'), false);
+});
+test('JWT verification enforces issuer, audience, expiry, subject and signature', async () => {
+  const { privateKey, publicKey } = await generateKeyPair('RS256');
+  const jwk = await exportJWK(publicKey); jwk.kid = 'test';
+  const key = createLocalJWKSet({ keys: [jwk] });
+  const auth = new JwtAuthenticator({ issuer: 'https://issuer.example', audience: 'https://gateway.example/mcp', jwksUrl: 'https://issuer.example/jwks', clients: [{ id: 'user1', token: serviceToken, allow: [] }], key });
+  const sign = (audience = 'https://gateway.example/mcp', subject = 'user1', expiry = '5m') => new SignJWT({}).setProtectedHeader({ alg: 'RS256', kid: 'test' }).setIssuer('https://issuer.example').setAudience(audience).setSubject(subject).setIssuedAt().setExpirationTime(expiry).sign(privateKey);
+  assert.equal((await auth.authenticate(await sign())).id, 'user1');
+  assert.equal(await auth.authenticate(await sign('wrong-audience')), undefined);
+  assert.equal(await auth.authenticate(await sign(undefined, 'unknown-user')), undefined);
+  assert.equal(await auth.authenticate(await sign(undefined, undefined, '-1s')), undefined);
+  assert.equal(await auth.authenticate('invalid.token.value'), undefined);
+  const wrongIssuer = await new SignJWT({}).setProtectedHeader({ alg: 'RS256', kid: 'test' }).setIssuer('https://other.example').setAudience('https://gateway.example/mcp').setSubject('user1').setIssuedAt().setExpirationTime('5m').sign(privateKey);
+  assert.equal(await auth.authenticate(wrongIssuer), undefined);
+  const alternate = await generateKeyPair('RS256');
+  const forged = await new SignJWT({}).setProtectedHeader({ alg: 'RS256', kid: 'test' }).setIssuer('https://issuer.example').setAudience('https://gateway.example/mcp').setSubject('user1').setIssuedAt().setExpirationTime('5m').sign(alternate.privateKey);
+  assert.equal(await auth.authenticate(forged), undefined);
+});
+test('sticky and weighted routing resolve only configured targets and honor client restrictions', () => {
+  const upstreams = [{ id: 'alpha', url: 'https://alpha.example/mcp' }, { id: 'beta', url: 'https://beta.example/mcp' }];
+  const router = new ConfigRouter({ clients: [], upstreams, routes: [{ name: 'echo', strategy: 'sticky', clients: ['user1'], targets: [{ upstreamId: 'alpha', tool: 'echo' }, { upstreamId: 'beta', tool: 'echo' }] }] });
+  const context = { principal: { id: 'user1', token: serviceToken, allow: [] }, requestId: 'test' };
+  const resolved = router.resolve('echo', context);
+  for (let i = 0; i < 100; i++) assert.equal(router.resolve('echo', context).upstream.id, resolved.upstream.id);
+  assert.equal(router.resolve('echo', { ...context, principal: { ...context.principal, id: 'other' } }), undefined);
+  assert.equal(router.resolve('missing__echo', context), undefined);
+});
+test('modern upstream prompts and resources preserve namespacing and enforce separate permissions', async t => {
+  const upstream = await listen(createModernDemoServer('modern'), t);
+  const config = { clients: [{ id: 'user1', token: serviceToken, allow: [], permissions: { prompts: ['modern__welcome'], resources: ['modern__notes://welcome'] } }], allowLocalHttp: true, upstreams: [{ id: 'modern', url: `${upstream}/mcp` }], features: { prompts: true, resources: true } };
+  const url = await listen(createGateway(config), t);
+  const client = await connect(url, t, { pin: '2026-07-28' });
+  assert.deepEqual((await client.listTools()).tools, []);
+  assert.equal((await client.listPrompts()).prompts[0].name, 'modern__welcome');
+  assert.equal((await client.getPrompt({ name: 'modern__welcome' })).messages[0].content.text, 'Welcome from modern');
+  await assert.rejects(client.getPrompt({ name: 'modern__secret' }), /forbidden/);
+  const resource = (await client.listResources()).resources[0];
+  assert.equal(resource.uri, 'mcp-gateway://modern/notes%3A%2F%2Fwelcome');
+  assert.equal((await client.readResource({ uri: resource.uri })).contents[0].text, 'modern note');
+  await assert.rejects(client.readResource({ uri: 'mcp-gateway://modern/notes%3A%2F%2Fsecret' }), /forbidden/);
+});
+test('custom routing and auth policy plugins are replaceable while destinations stay pinned', async t => {
+  const upstream = await listen(createModernDemoServer('approved'), t);
+  const config = { allowLocalHttp: true, clients: [{ id: 'user1', token: serviceToken, allow: ['custom'] }], upstreams: [{ id: 'alpha', url: `${upstream}/mcp` }], routes: [{ name: 'custom', strategy: 'priority', targets: [{ upstreamId: 'alpha', tool: 'echo' }] }] };
+  const router = { names: () => ['custom'], resolve: () => ({ upstream: { id: 'alpha', url: 'https://untrusted.example' }, tool: 'echo' }) };
+  const url = await listen(createGateway(config, { router }), t);
+  const client = await connect(url, t);
+  assert.equal((await client.listTools()).tools[0].name, 'custom');
+  assert.equal((await client.callTool({ name: 'custom', arguments: { text: 'pinned' } })).content[0].text, 'approved: pinned');
+  const blocked = await listen(createGateway(config, { router, authorizer: { canCall: async () => { throw new Error('policy backend offline'); } } }), t);
+  const deniedClient = await connect(blocked, t);
+  assert.deepEqual((await deniedClient.listTools()).tools, []);
+  await assert.rejects(deniedClient.callTool({ name: 'custom' }), /forbidden/);
+});
+test('OAuth metadata advertises the resource and authentication challenge', async t => {
+  const store = new SqliteStore(':memory:', document); t.after(() => store.close());
+  const env = { SERVICE_TOKEN: serviceToken, JWT_ISSUER: 'https://issuer.example', JWT_JWKS_URL: 'https://issuer.example/jwks', JWT_AUDIENCE: 'https://gateway.example/mcp', GATEWAY_RESOURCE_URL: 'https://gateway.example/mcp', JWT_REQUIRED_SCOPES: 'mcp:access' };
+  const url = await listen(createRuntime(store, { adminKey: adminToken, environment: env }), t);
+  const metadata = await (await fetch(`${url}/.well-known/oauth-protected-resource/mcp`)).json();
+  assert.equal(metadata.resource, 'https://gateway.example/mcp');
+  assert.deepEqual(metadata.authorization_servers, ['https://issuer.example']);
+  const response = await fetch(`${url}/mcp`, { method: 'POST' });
+  assert.equal(response.status, 401);
+  assert.equal(response.headers.get('www-authenticate'), 'Bearer resource_metadata="https://gateway.example/.well-known/oauth-protected-resource/mcp"');
+});
+test('namespace wildcards cannot grant a public alias to another upstream', async () => {
+  const principal = { id: 'user1', token: serviceToken, allow: ['echo__*'], roles: ['reader'] };
+  assert.equal(await new AllowListAuthorizer().canCall(principal, 'echo'), false);
+  assert.equal(await new RoleAuthorizer({ reader: ['echo__*'] }).canCall(principal, 'echo'), false);
+  assert.equal(await new AllowListAuthorizer().canCall(principal, 'echo__original'), true);
+});
+test('published route simulation evaluates policy without executing an upstream tool', async t => {
+  const initial = { ...document, upstreams: [{ id: 'alpha', url: 'https://unreachable.example/mcp' }], routes: [{ name: 'echo', strategy: 'sticky', targets: [{ upstreamId: 'alpha', tool: 'echo' }] }] };
+  const store = new SqliteStore(':memory:', initial); t.after(() => store.close());
+  const url = await listen(createRuntime(store, { adminKey: adminToken, environment: { SERVICE_TOKEN: serviceToken } }), t);
+  const simulate = tool => fetch(`${url}/admin/api/resolve`, { method: 'POST', headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: 'user1', tool }) });
+  assert.deepEqual(await (await simulate('echo')).json(), { revision: 1, authorized: true, routable: true, upstreamId: 'alpha', upstreamTool: 'echo', reason: 'Policy granted; configured target selected' });
+  assert.equal((await (await simulate('private')).json()).authorized, false);
+  assert.equal((await store.recentAudit()).length, 0);
+});
+test('valid JWT without required scope receives the standard insufficient_scope challenge', async t => {
+  const { privateKey, publicKey } = await generateKeyPair('RS256'); const jwk = await exportJWK(publicKey); jwk.kid = 'scope-test';
+  const config = { clients: [{ id: 'user1', token: serviceToken, allow: [] }], upstreams: [] };
+  const authenticator = new JwtAuthenticator({ issuer: 'https://issuer.example', audience: 'gateway', jwksUrl: 'https://issuer.example/jwks', clients: config.clients, key: createLocalJWKSet({ keys: [jwk] }), requiredScopes: ['mcp:access'] });
+  const url = await listen(createGateway(config, { authenticator }), t);
+  const token = await new SignJWT({ scope: 'other' }).setProtectedHeader({ alg: 'RS256', kid: 'scope-test' }).setIssuer('https://issuer.example').setAudience('gateway').setSubject('user1').setIssuedAt().setExpirationTime('5m').sign(privateKey);
+  const response = await fetch(`${url}/mcp`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(response.status, 403);
+  assert.equal(response.headers.get('www-authenticate'), 'Bearer error="insufficient_scope", scope="mcp:access"');
+});
+test('gateway validates tool input even when an upstream omits its own validation', async t => {
+  const upstream = await listen(createModernDemoServer('permissive'), t);
+  const url = await listen(createGateway({ allowLocalHttp: true, clients: [{ id: 'user1', token: serviceToken, allow: ['modern__*'] }], upstreams: [{ id: 'modern', url: `${upstream}/mcp` }] }), t);
+  const client = await connect(url, t);
+  await assert.rejects(client.callTool({ name: 'modern__echo', arguments: { text: 42 } }), /input schema/);
+  await assert.rejects(client.callTool({ name: 'modern__nonexistent', arguments: {} }), /Tool unavailable/);
+});

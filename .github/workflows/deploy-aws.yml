@@ -1,0 +1,70 @@
+name: Deploy Relay demo to AWS
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: relay-demo-production
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run website:check
+      - run: npm test
+      - run: docker build -t relay-mcp-gateway:deploy-check .
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: demo
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - uses: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d116df # v4.2.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Sign in to Amazon ECR
+        env:
+          REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          registry="${REPOSITORY_URI%%/*}"
+          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$registry"
+      - name: Build and publish the gateway image
+        env:
+          REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
+        run: |
+          docker build --pull -t "$REPOSITORY_URI:${GITHUB_SHA}" -t "$REPOSITORY_URI:latest" .
+          docker push "$REPOSITORY_URI:${GITHUB_SHA}"
+          docker push "$REPOSITORY_URI:latest"
+      - name: Deploy the gateway image
+        env:
+          APP_RUNNER_SERVICE_ARN: ${{ vars.APP_RUNNER_SERVICE_ARN }}
+        run: aws apprunner start-deployment --service-arn "$APP_RUNNER_SERVICE_ARN"
+      - name: Build and publish the website
+        env:
+          RELAY_MCP_ENDPOINT: ${{ vars.RELAY_MCP_ENDPOINT }}
+          WEBSITE_BUCKET: ${{ vars.WEBSITE_BUCKET }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          npm run website:build
+          aws s3 sync website/dist "s3://$WEBSITE_BUCKET" --delete --region "$AWS_REGION"
+          aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths '/*'

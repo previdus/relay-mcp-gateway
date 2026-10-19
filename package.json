@@ -1,0 +1,53 @@
+{
+  "name": "relay-mcp-gateway",
+  "version": "0.12.0",
+  "private": false,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.14"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env dist/main.js",
+    "demo": "npm run build && node dist/demo.js",
+    "demo:cloud": "npm run build && node dist/cloud-demo.js",
+    "test": "npm run build && node --test --test-concurrency=4 test/*.test.js",
+    "check": "tsc --noEmit",
+    "build": "tsc",
+    "test:browser": "npm run build && node --test integration/browser.test.js",
+    "test:services": "npm run build && node --test integration/services.test.js",
+    "test:container": "node scripts/container-smoke.js",
+    "test:kubernetes": "node scripts/kubernetes-smoke.js",
+    "perf:smoke": "npm run build && node scripts/perf-smoke.js",
+    "website:build": "node scripts/build-website.js",
+    "website:check": "npm run website:build && node --test test/website.test.js",
+    "website:preview": "npm run website:build && node scripts/preview-website.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/core": "2.3.1",
+    "@modelcontextprotocol/express": "2.0.2",
+    "@modelcontextprotocol/ext-tasks": "0.2.2",
+    "@modelcontextprotocol/node": "2.1.1",
+    "@modelcontextprotocol/server": "2.3.1",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/exporter-trace-otlp-http": "0.223.0",
+    "@opentelemetry/resources": "2.12.0",
+    "@opentelemetry/sdk-trace-node": "2.12.0",
+    "express": "5.1.0",
+    "ipaddr.js": "2.2.0",
+    "jose": "6.2.12",
+    "pg": "8.23.1",
+    "undici": "7.30.1",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@types/express": "5.0.6",
+    "@types/node": "22.20.5",
+    "@types/pg": "8.23.1",
+    "playwright": "1.62.1",
+    "typescript": "7.0.2",
+    "yaml": "2.9.1"
+  }
+}

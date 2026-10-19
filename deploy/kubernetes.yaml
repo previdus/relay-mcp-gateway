@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: relay-gateway
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels: { app: relay-gateway }
+  template:
+    metadata:
+      labels: { app: relay-gateway }
+    spec:
+      terminationGracePeriodSeconds: 135
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: relay-gateway }
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: relay-gateway }
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gateway
+          image: relay-gateway:0.12.0
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 3000 }]
+          envFrom: [{ secretRef: { name: relay-gateway-secrets } }]
+          env:
+            - { name: HOST, value: "0.0.0.0" }
+            - { name: GATEWAY_SHUTDOWN_TIMEOUT_MS, value: "120000" }
+            - { name: GATEWAY_ALLOWED_HOSTS, value: "127.0.0.1,localhost,gateway.example.com,relay-gateway" }
+          resources:
+            requests: { cpu: "250m", memory: "384Mi" }
+            limits: { cpu: "1", memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: scratch, mountPath: /app/data }
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+              httpHeaders: [{ name: Host, value: localhost }]
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 3000
+              httpHeaders: [{ name: Host, value: localhost }]
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+              httpHeaders: [{ name: Host, value: localhost }]
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: scratch
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata: { name: relay-gateway }
+spec:
+  selector: { app: relay-gateway }
+  ports: [{ port: 80, targetPort: 3000 }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: relay-gateway }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: relay-gateway }
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: relay-gateway }
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: relay-gateway }

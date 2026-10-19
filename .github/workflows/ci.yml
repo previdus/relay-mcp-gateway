@@ -1,0 +1,67 @@
+name: Verify gateway
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm sbom --sbom-format=cyclonedx --omit=dev > gateway.sbom.cdx.json
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: gateway-production-dependencies-sbom
+          path: gateway.sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+      - run: npm run check
+      - run: npm run website:check
+      - run: node scripts/check-deploy.js
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - run: docker compose -f deploy/compose.test.yaml up -d --wait postgres openfga opa
+      - run: node scripts/wait-services.js
+      - run: npm run test:services
+        env:
+          TEST_DATABASE_URL: postgresql://gateway_test:disposable-integration-only@127.0.0.1:55432/gateway_test
+          TEST_FGA_URL: http://127.0.0.1:58080
+          TEST_OPA_URL: http://127.0.0.1:58181/v1/data/mcp/authz/allow
+      - run: docker build -t relay-gateway:0.12.0 .
+      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: relay-gateway:0.12.0
+          format: cyclonedx-json
+          output-file: gateway.image.sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: gateway-container-image-sbom
+          path: gateway.image.sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+      - uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          sbom: gateway.image.sbom.cdx.json
+          fail-build: true
+          severity-cutoff: high
+          grype-version: v0.118.0
+          output-format: json
+          output-file: gateway.image.vulnerabilities.json
+      - if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: gateway-image-vulnerability-report
+          path: gateway.image.vulnerabilities.json
+          if-no-files-found: warn
+          retention-days: 30
+      - run: node scripts/container-smoke.js
+      - if: always()
+        run: docker compose -f deploy/compose.test.yaml down

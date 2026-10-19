@@ -1,0 +1,299 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Relay public echo demo: App Runner gateway and private S3 website behind CloudFront.'
+Parameters:
+  ImageUri:
+    Type: String
+    Description: Full URI of the already-published demo image in this account's ECR repository.
+    AllowedPattern: '^\d{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com\/[a-z0-9/_-]+:[A-Za-z0-9._-]+$'
+  GitHubOwner:
+    Type: String
+    Description: GitHub user or organization that owns the public repository.
+  GitHubRepository:
+    Type: String
+    Default: relay-mcp-gateway
+  GitHubOidcProviderArn:
+    Type: String
+    Description: AWS IAM OIDC provider ARN for https://token.actions.githubusercontent.com.
+  BudgetEmail:
+    Type: String
+    Description: Email that receives AWS budget warnings.
+    AllowedPattern: '^[^\s@]+@[^\s@]+\.[^\s@]+$'
+  GatewayAllowedHosts:
+    Type: String
+    Default: ''
+    Description: App Runner hostname, without scheme. The deployment script fills this from the service URL.
+Resources:
+  GatewayAdminSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Random Relay demo administrator key. Retrieve only from the AWS account owner.
+      GenerateSecretString:
+        PasswordLength: 48
+        ExcludePunctuation: true
+      Tags:
+        - Key: Project
+          Value: relay-mcp-gateway-demo
+
+  AppRunnerAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: build.apprunner.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PullDemoImage
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/relay-mcp-gateway-demo'
+
+  AppRunnerInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: tasks.apprunner.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ReadOnlyGatewayAdminSecret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref GatewayAdminSecret
+
+  DemoAutoScaling:
+    Type: AWS::AppRunner::AutoScalingConfiguration
+    Properties:
+      AutoScalingConfigurationName: relay-demo-single-instance
+      MaxConcurrency: 30
+      MinSize: 1
+      MaxSize: 1
+
+  GatewayService:
+    Type: AWS::AppRunner::Service
+    Properties:
+      ServiceName: relay-mcp-gateway-demo
+      SourceConfiguration:
+        AutoDeploymentsEnabled: false
+        AuthenticationConfiguration:
+          AccessRoleArn: !GetAtt AppRunnerAccessRole.Arn
+        ImageRepository:
+          ImageRepositoryType: ECR
+          ImageIdentifier: !Ref ImageUri
+          ImageConfiguration:
+            Port: '3000'
+            StartCommand: node dist/cloud-demo.js
+            RuntimeEnvironmentVariables:
+              HOST: 0.0.0.0
+              DEMO_TOKEN: relay-public-echo-demo-token
+              GATEWAY_ALLOWED_HOSTS: !Ref GatewayAllowedHosts
+            RuntimeEnvironmentSecrets:
+              GATEWAY_ADMIN_KEY: !Ref GatewayAdminSecret
+      AutoScalingConfigurationArn: !GetAtt DemoAutoScaling.AutoScalingConfigurationArn
+      HealthCheckConfiguration:
+        Protocol: HTTP
+        Path: /healthz
+        Interval: 10
+        Timeout: 5
+        HealthyThreshold: 2
+        UnhealthyThreshold: 5
+      InstanceConfiguration:
+        Cpu: 0.25 vCPU
+        Memory: 0.5 GB
+        InstanceRoleArn: !GetAtt AppRunnerInstanceRole.Arn
+      NetworkConfiguration:
+        IngressConfiguration:
+          IsPubliclyAccessible: true
+      Tags:
+        - Key: Project
+          Value: relay-mcp-gateway-demo
+
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Project
+          Value: relay-mcp-gateway-demo
+
+  WebsiteOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${AWS::StackName}-website-oac'
+        Description: CloudFront-only access to the private Relay website bucket.
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  WebsiteDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: RelayWebsiteS3
+            DomainName: !GetAtt WebsiteBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt WebsiteOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: RelayWebsiteS3
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+        Tags:
+          - Key: Project
+            Value: relay-mcp-gateway-demo
+
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowOnlyThisCloudFrontDistribution
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${WebsiteBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${WebsiteDistribution}'
+
+  GitHubDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-github-deploy'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOwner}/${GitHubRepository}:ref:refs/heads/main'
+      Policies:
+        - PolicyName: DeployRelayImageAndWebsite
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource: !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/relay-mcp-gateway-demo'
+              - Effect: Allow
+                Action:
+                  - apprunner:DescribeService
+                  - apprunner:StartDeployment
+                Resource: !GetAtt GatewayService.ServiceArn
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt WebsiteBucket.Arn
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub '${WebsiteBucket.Arn}/*'
+              - Effect: Allow
+                Action: cloudfront:CreateInvalidation
+                Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${WebsiteDistribution}'
+
+  DemoBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub '${AWS::StackName}-monthly-warning'
+        BudgetLimit:
+          Amount: 10
+          Unit: USD
+        TimeUnit: MONTHLY
+        BudgetType: COST
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+
+Outputs:
+  WebsiteUrl:
+    Description: HTTPS website URL served by CloudFront.
+    Value: !Sub 'https://${WebsiteDistribution.DomainName}'
+  WebsiteBucketName:
+    Value: !Ref WebsiteBucket
+  CloudFrontDistributionId:
+    Value: !Ref WebsiteDistribution
+  GatewayUrl:
+    Description: HTTPS App Runner gateway URL.
+    Value: !Sub 'https://${GatewayService.ServiceUrl}'
+  McpEndpoint:
+    Description: MCP Streamable HTTP endpoint. Demo bearer key only permits the echo tool.
+    Value: !Sub 'https://${GatewayService.ServiceUrl}/mcp'
+  GatewayAdminSecretArn:
+    Description: Secret ARN for the generated gateway administrator key.
+    Value: !Ref GatewayAdminSecret
+  AppRunnerServiceArn:
+    Value: !GetAtt GatewayService.ServiceArn
+  GitHubDeployRoleArn:
+    Value: !GetAtt GitHubDeployRole.Arn
+  EcrRepositoryUri:
+    Value: !Select [0, !Split [':', !Ref ImageUri]]

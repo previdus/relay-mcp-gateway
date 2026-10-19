@@ -1,0 +1,263 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { chromium } from 'playwright';
+import express from 'express';
+import { createRuntime } from '../dist/runtime.js';
+import { SqliteStore } from '../dist/store.js';
+import { listen, document, adminToken, serviceToken } from '../test/helpers.js';
+
+const launchBrowser = () => chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}) });
+
+test('console explains setup flow and groups configuration fields with examples', async t => {
+  const store = new SqliteStore(':memory:', { ...document, upstreams: [{ id: 'alpha', url: 'https://alpha.example/mcp' }] }); t.after(() => store.close());
+  const url = await listen(createRuntime(store, { adminKey: adminToken, environment: { SERVICE_TOKEN: serviceToken } }), t);
+  const browser = await launchBrowser(); t.after(() => browser.close());
+  const page = await browser.newPage(); const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${url}/admin/`); await page.getByLabel('Administrator key').fill(adminToken); await page.getByRole('button', { name: 'Connect to gateway' }).click();
+  await page.getByRole('button', { name: 'Upstream servers' }).click();
+  await page.getByRole('heading', { name: 'Connection flow' }).waitFor();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByRole('group', { name: 'Identity and naming' }).waitFor();
+  await page.getByText(/Name of an environment variable containing a secret/).waitFor();
+  await page.getByRole('group', { name: 'Connection' }).waitFor();
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await page.locator('[data-tab=configuration]').click();
+  await page.getByRole('heading', { name: 'What happens when an agent calls a tool' }).waitFor();
+  await page.getByText('Settings, grouped by purpose').waitFor();
+  await page.getByText('Identity and authentication', { exact: true }).waitFor();
+  await page.getByText(/secret values belong in a secret manager/).waitFor();
+  await page.locator('.raw-config summary').click();
+  await page.getByLabel('Gateway configuration JSON').waitFor();
+  assert.deepEqual(errors, []);
+});
+
+test('action safeguards configure task capability and persist catalog and argument restrictions', async t => {
+  const store = new SqliteStore(':memory:', document); t.after(() => store.close());
+  const url = await listen(createRuntime(store, { adminKey: adminToken, environment: { SERVICE_TOKEN: serviceToken, GATEWAY_STATE_KEY: 'ui-task-feature-key-at-least-32-bytes' } }), t);
+  const browser = await launchBrowser(); t.after(() => browser.close());
+  const page = await browser.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));
+  await page.goto(`${url}/admin/`);
+  await page.getByLabel('Administrator key').fill(adminToken);
+  await page.getByRole('button', { name: 'Connect to gateway' }).click();
+  await page.getByRole('button', { name: 'Action safeguards' }).click();
+  await page.getByLabel('Expose only pinned tool definitions').check();
+  await page.getByLabel('Reject display controls in tool metadata').check();
+  await page.getByLabel('Discovery parallel upstreams').fill('2');
+  await page.getByLabel('Tools per discovery page').fill('1');
+  await page.getByLabel('Maximum catalog candidates').fill('10');
+  await page.getByLabel('Maximum catalog bytes').fill('4096');
+  await page.getByLabel('Enable authorized catalog search').check();
+  await page.getByLabel('Enable MCP Tasks V2 for asynchronous tool calls').check();
+  await page.getByLabel('Tool argument policies (JSON)').fill('{"pay":{"allow":[{"constraints":[]}]}}');
+  await page.getByRole('button', { name: 'Apply safeguards to draft' }).click();
+  await page.getByRole('status').filter({ hasText: 'Invalid gateway configuration' }).waitFor();
+  const policies = { pay: { allow: [{ constraints: [{ field: ['amount'], op: 'numberRange', max: 100 }] }] } };
+  await page.getByLabel('Tool argument policies (JSON)').fill(JSON.stringify(policies));
+  await page.getByRole('button', { name: 'Apply safeguards to draft' }).click();
+  await page.getByRole('status').filter({ hasText: 'Safeguards applied to draft' }).waitFor();
+  await page.getByRole('button', { name: 'Publish changes' }).click();
+  await page.getByText('Revision 2 · connected', { exact: true }).waitFor();
+  assert.deepEqual((await store.read()).document.invocationPolicies, policies);
+  assert.deepEqual((await store.read()).document.catalogPolicy, { requirePinned: true, rejectControlCharacters: true });
+  assert.deepEqual((await store.read()).document.discovery, { concurrency: 2, pageSize: 1, maxTools: 10, maxBytes: 4096 });
+  assert.equal((await store.read()).document.features.catalogSearch, true);
+  assert.equal((await store.read()).document.features.tasks, true);
+  await page.getByRole('button', { name: 'Reload', exact: true }).click();
+  await page.getByLabel('Tool argument policies (JSON)').waitFor();
+  assert.deepEqual(JSON.parse(await page.getByLabel('Tool argument policies (JSON)').inputValue()), policies);
+  assert.equal(await page.getByLabel('Expose only pinned tool definitions').isChecked(), true);
+  assert.deepEqual(errors, []);
+});
+
+test('console configures approval-required tools when the deployment approval adapter is preconfigured', async t => {
+  const approvalApp = express(); approvalApp.post('/decide', (_req, res) => res.json({ decision: 'deny' }));
+  const approvalService = await listen(approvalApp, t);
+  const store = new SqliteStore(':memory:', document); t.after(() => store.close());
+  const url = await listen(createRuntime(store, { adminKey: adminToken, environment: {
+    SERVICE_TOKEN: serviceToken, APPROVAL_DECISION_URL: `${approvalService}/decide`,
+    APPROVAL_BEARER_TOKEN: 'browser-approval-service-credential', APPROVAL_ALLOW_LOCAL_HTTP: 'true'
+  } }), t);
+  const browser = await launchBrowser(); t.after(() => browser.close());
+  const page = await browser.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));
+  await page.goto(`${url}/admin/`);
+  await page.getByLabel('Administrator key').fill(adminToken);
+  await page.getByRole('button', { name: 'Connect to gateway' }).click();
+  await page.getByRole('button', { name: 'Action safeguards' }).click();
+  await page.getByLabel(/Tools requiring independent approval/).fill('echo');
+  await page.getByRole('button', { name: 'Apply safeguards to draft' }).click();
+  await page.getByRole('status').filter({ hasText: 'Safeguards applied to draft' }).waitFor();
+  await page.getByRole('button', { name: 'Publish changes' }).click();
+  await page.getByText('Revision 2 · connected', { exact: true }).waitFor();
+  assert.deepEqual((await store.read()).document.approvalRequiredTools, ['echo']);
+  await page.getByRole('button', { name: 'Reload', exact: true }).click();
+  assert.equal(await page.getByLabel(/Tools requiring independent approval/).inputValue(), 'echo');
+  assert.deepEqual(errors, []);
+});
+
+test('tool explorer walks standard pages and searches the authorized catalog', async t => {
+  const { createModernDemoServer } = await import('../dist/demo-modern.js');
+  const upstream = await listen(createModernDemoServer('search-browser'), t);
+  const initial = { ...document, features: { catalogSearch: true }, discovery: { pageSize: 1 }, upstreams: [{ id: 'alpha', url: `${upstream}/mcp` }], routes: [{ name: 'echo', strategy: 'rendezvous', targets: [{ upstreamId: 'alpha', tool: 'echo' }] }] };
+  const store = new SqliteStore(':memory:', initial); t.after(() => store.close());
+  const url = await listen(createRuntime(store, { adminKey: adminToken, environment: { SERVICE_TOKEN: serviceToken } }), t);
+  await store.write({ ...initial, allowedOrigins: [url] }, 1);
+  const browser = await launchBrowser(); t.after(() => browser.close());
+  const page = await browser.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));
+  await page.goto(`${url}/admin/`); await page.getByLabel('Administrator key').fill(adminToken); await page.getByRole('button', { name: 'Connect to gateway' }).click();
+  await page.getByRole('button', { name: 'Tool explorer' }).click(); await page.getByLabel('Service access key').fill(serviceToken); await page.getByRole('button', { name: 'Discover tools' }).click();
+  await page.getByRole('heading', { name: '2 permitted tools' }).waitFor();
+  await page.getByLabel('Service access key').fill(serviceToken); await page.getByLabel('Search tools (optional)').fill('alpha'); await page.getByRole('button', { name: 'Discover tools' }).click();
+  await page.getByRole('heading', { name: '1 permitted tools' }).waitFor();
+  assert.ok(await page.getByLabel('Definition of alpha__echo').isVisible());
+  assert.equal(await page.getByLabel('Service access key').inputValue(), ''); assert.deepEqual(errors, []);
+});
+test('console login, route configuration, publish, reload, activity and mobile layout', async t => {
+  const store = new SqliteStore(':memory:', { ...document, upstreams: [{ id: 'alpha', url: 'https://alpha.example/mcp' }] });
+  t.after(() => store.close());
+  const url = await listen(createRuntime(store, { adminKey: adminToken, environment: { SERVICE_TOKEN: serviceToken } }), t);
+  const browser = await launchBrowser(); t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${url}/admin/`);
+  await page.getByLabel('Administrator key').fill(adminToken);
+  await page.getByRole('button', { name: 'Connect to gateway' }).click();
+  await page.locator('#workspace').waitFor({ state: 'visible' });
+  await page.getByRole('button', { name: 'Routing' }).click();
+  await page.getByRole('button', { name: '+ Add route' }).click();
+  await page.getByLabel('Public tool name').fill('echo');
+  await page.getByRole('button', { name: 'Apply to draft' }).click();
+  assert.ok(await page.getByRole('cell', { name: 'echo', exact: true }).isVisible());
+  await page.getByRole('button', { name: 'Publish changes' }).click();
+  await page.getByText('Revision 2 · connected', { exact: true }).waitFor();
+  assert.equal((await store.read()).document.routes[0].name, 'echo');
+  await page.getByLabel('Simulation tool').fill('echo');
+  await page.getByRole('button', { name: 'Evaluate route' }).click();
+  await page.getByText('Revision 2: Policy granted; configured target selected → alpha / echo', { exact: true }).waitFor();
+  await page.locator('[data-tab=configuration]').click();
+  await page.locator('.raw-config summary').click();
+  await page.getByLabel('Gateway configuration JSON').fill(JSON.stringify({ clients: [null], upstreams: [] }));
+  await page.getByRole('button', { name: 'Apply JSON to draft' }).click();
+  await page.getByRole('status').filter({ hasText: 'Invalid gateway configuration' }).waitFor();
+  await page.getByRole('button', { name: 'Reload', exact: true }).click();
+  await page.getByRole('button', { name: 'Activity' }).click();
+  await page.getByRole('cell', { name: 'admin/config.update' }).waitFor();
+  await page.getByRole('button', { name: 'Overview' }).click();
+  await page.locator('#message').evaluate(element => { element.style.display = 'none'; });
+  if (process.env.SCREENSHOT_PATH) await page.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await page.getByRole('heading', { name: 'Overview', exact: true }).isVisible());
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+  assert.deepEqual(errors, []);
+  assert.equal(await page.evaluate(() => localStorage.length), 0);
+});
+
+test('console can stop a trusted JWT issuer and revoke one token without entering its bearer token', async t => {
+  const issuer = 'https://identity.example', audience = 'https://gateway.example/mcp';
+  const config = { clients: [{ id: 'agent', subject: 'workload', oauthIssuer: issuer, allow: ['alpha__echo'] }], upstreams: [] };
+  const store = new SqliteStore(':memory:', config); t.after(() => store.close());
+  const url = await listen(createRuntime(store, { adminKey: adminToken, environment: { JWT_ISSUER: issuer, JWT_AUDIENCE: audience, JWT_JWKS_URL: `${issuer}/keys`, GATEWAY_RESOURCE_URL: audience, JWT_REVOCATION_ENABLED: 'true' } }), t);
+  const browser = await launchBrowser(); t.after(() => browser.close());
+  const page = await browser.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${url}/admin/`); await page.getByLabel('Administrator key').fill(adminToken); await page.getByRole('button', { name: 'Connect to gateway' }).click();
+  await page.getByRole('button', { name: 'Identity security' }).click();
+  await page.getByRole('button', { name: 'Block issuer' }).click();
+  await page.getByRole('status').filter({ hasText: 'Issuer disabled across replicas' }).waitFor();
+  assert.equal(await store.isJwtIssuerDisabled(issuer), true);
+  await page.getByRole('button', { name: 'Re-enable issuer' }).click();
+  await page.getByRole('status').filter({ hasText: 'Issuer re-enabled' }).waitFor();
+  assert.equal(await store.isJwtIssuerDisabled(issuer), false);
+  await page.getByLabel('JWT ID (jti)').fill('revocable-jwt-1234567890');
+  await page.getByRole('button', { name: 'Revoke JWT' }).click();
+  await page.getByRole('status').filter({ hasText: 'JWT revoked' }).waitFor();
+  assert.equal(await store.isJwtRevoked(issuer, 'revocable-jwt-1234567890'), true);
+  assert.deepEqual(errors, []);
+});
+
+test('console persists verified-agent and mTLS bindings, routing selectors, priorities and upstream deadlines', async t => {
+  const initial={...document,upstreams:[{id:'alpha',url:'https://alpha.example/mcp'}]};
+  const store=new SqliteStore(':memory:',initial);t.after(()=>store.close());
+  const url=await listen(createRuntime(store,{adminKey:adminToken,environment:{SERVICE_TOKEN:serviceToken}}),t);
+  const browser=await launchBrowser();t.after(()=>browser.close());const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(`${url}/admin/`);await page.getByLabel('Administrator key').fill(adminToken);await page.getByRole('button',{name:'Connect to gateway'}).click();
+  await page.getByRole('button',{name:'Upstream servers',exact:false}).click();await page.getByRole('button',{name:'Edit',exact:true}).first().click();
+  await page.getByLabel('Total upstream time budget, milliseconds (optional)').fill('1500');await page.getByLabel('Connection time limit, milliseconds (optional)').fill('500');await page.getByLabel('Protocol discovery cache TTL in ms (optional; enable only for homogeneous MCP versions)').fill('15000');await page.getByRole('button',{name:'Apply to draft'}).click();
+  await page.getByRole('button',{name:'Access policies',exact:false}).click();await page.getByRole('button',{name:'Edit',exact:true}).first().click();
+  await page.getByLabel('Verified token subject (OAuth identity)').fill('user-subject');await page.getByLabel('Trusted OAuth issuer (required for multi-issuer JWT mode)').fill('https://issuer.example');await page.getByLabel('Verified OAuth client ID (optional)').fill('agent-client');await page.getByLabel('Pinned client certificate SHA-256 thumbprint (mTLS)').fill('A'.repeat(43));await page.getByLabel('Gateway credential environment variable (optional)').fill('');await page.getByRole('button',{name:'Apply to draft'}).click();
+  await page.getByRole('button',{name:'Routing',exact:false}).click();await page.getByRole('button',{name:'+ Add route'}).click();
+  await page.getByLabel('Public tool name').fill('priorityecho');await page.getByLabel('Routing strategy').selectOption('priority');await page.getByLabel('Allowed tenants (optional, comma separated)').fill('default');await page.getByLabel('Required roles, all must match (optional, comma separated)').fill('reader');await page.getByLabel('Target 1 priority').fill('5');await page.getByLabel('Target 1 enabled').uncheck();
+  await page.getByRole('button',{name:'Apply to draft'}).click();await page.getByRole('button',{name:'Publish changes'}).click();await page.getByText('Revision 2 · connected',{exact:true}).waitFor();
+  const saved=(await store.read()).document;assert.equal(saved.upstreams[0].timeoutMs,1500);assert.equal(saved.upstreams[0].connectTimeoutMs,500);assert.equal(saved.upstreams[0].discoveryCacheTtlMs,15000);assert.equal(saved.clients[0].oauthClientId,'agent-client');assert.equal(saved.clients[0].oauthIssuer,'https://issuer.example');assert.equal(saved.clients[0].subject,'user-subject');assert.equal(saved.clients[0].certificateSha256,'A'.repeat(43));assert.equal(Object.hasOwn(saved.clients[0],'tokenEnv'),false);assert.equal(saved.routes[0].strategy,'priority');assert.deepEqual(saved.routes[0].requiredRoles,['reader']);assert.deepEqual(saved.routes[0].tenants,['default']);assert.equal(saved.routes[0].targets[0].priority,5);assert.equal(saved.routes[0].targets[0].enabled,false);assert.deepEqual(errors,[]);
+});
+
+test('console configures explicit HTTP request paths for deployment-bound SSE', async t => {
+  const initial = { ...document, upstreams: [{ id: 'alpha', url: 'https://alpha.example/mcp', transport: 'sse' }] };
+  const store = new SqliteStore(':memory:', initial); t.after(() => store.close());
+  const url = await listen(createRuntime(store, { adminKey: adminToken, environment: { SERVICE_TOKEN: serviceToken } }), t);
+  const browser = await launchBrowser(); t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(`${url}/admin/`); await page.getByLabel('Administrator key').fill(adminToken); await page.getByRole('button', { name: 'Connect to gateway' }).click();
+  await page.getByRole('button', { name: 'Upstream servers', exact: false }).click(); await page.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  await page.getByLabel('Allowed request paths (JSON array; optional, defaults to the configured endpoint path)').fill('["/mcp", "/messages"]');
+  await page.getByRole('button', { name: 'Apply to draft' }).click(); await page.getByRole('button', { name: 'Publish changes' }).click();
+  await page.getByText('Revision 2 · connected', { exact: true }).waitFor();
+  assert.deepEqual((await store.read()).document.upstreams[0].requestPaths, ['/mcp', '/messages']);
+});
+
+test('console traffic controls validate, publish and persist request and recovery budgets', async t => {
+  const store = new SqliteStore(':memory:', document); t.after(() => store.close());
+  const url = await listen(createRuntime(store, { adminKey: adminToken, environment: { SERVICE_TOKEN: serviceToken } }), t);
+  const browser = await launchBrowser(); t.after(() => browser.close());
+  const page = await browser.newPage();
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${url}/admin/`);
+  await page.getByLabel('Administrator key').fill(adminToken);
+  await page.getByRole('button', { name: 'Connect to gateway' }).click();
+  await page.getByRole('button', { name: 'Traffic controls' }).click();
+  await page.getByLabel('Enable per-identity request rate limit').check();
+  await page.getByLabel('Burst capacity').fill('12');
+  await page.getByLabel('Requests restored per second').fill('2');
+  await page.getByLabel('Enable upstream circuit breakers').check();
+  await page.getByLabel('Failures before circuit opens').fill('3');
+  await page.getByLabel('Recovery delay in milliseconds').fill('5000');
+  await page.getByRole('button', { name: 'Apply traffic controls to draft' }).click();
+  await page.getByRole('status').filter({ hasText: 'Traffic controls applied to draft' }).waitFor();
+  await page.getByRole('button', { name: 'Publish changes' }).click();
+  await page.getByText('Revision 2 · connected', { exact: true }).waitFor();
+  assert.deepEqual((await store.read()).document.traffic, { rateLimit: { capacity: 12, refillPerSecond: 2 }, circuitBreaker: { failureThreshold: 3, resetAfterMs: 5000 } });
+  await page.getByRole('button', { name: 'Reload', exact: true }).click();
+  await page.getByLabel('Burst capacity').waitFor();
+  assert.equal(await page.getByLabel('Burst capacity').inputValue(), '12');
+  assert.equal(await page.getByLabel('Enable upstream circuit breakers').isChecked(), true);
+  assert.deepEqual(errors, []);
+});
+
+test('console reviews history and restores a prior revision as a new publication',async t=>{
+  const store=new SqliteStore(':memory:',document);t.after(()=>store.close());
+  await store.write({...document,timeoutMs:1234},1);
+  const url=await listen(createRuntime(store,{adminKey:adminToken,environment:{SERVICE_TOKEN:serviceToken}}),t);
+  const browser=await launchBrowser();t.after(()=>browser.close());const page=await browser.newPage();
+  await page.goto(`${url}/admin/`);await page.getByLabel('Administrator key').fill(adminToken);await page.getByRole('button',{name:'Connect to gateway'}).click();await page.locator('#workspace').waitFor({state:'visible',timeout:10000});
+  await page.getByRole('button',{name:'Configuration history'}).click();await page.getByRole('button',{name:'Review revision 1',exact:true}).click();
+  await page.getByLabel('Historical configuration').waitFor();
+  await page.getByRole('button',{name:'Publish this revision as a new configuration'}).click();await page.getByText('Revision 3 · connected',{exact:true}).waitFor();
+  assert.equal((await store.read()).document.timeoutMs,undefined);assert.deepEqual((await store.history()).map(r=>r.revision),[3,2,1]);
+});
+
+test('tool explorer discovers and invokes as a service identity and pins reviewed definitions',async t=>{
+  const {createModernDemoServer}=await import('../dist/demo-modern.js');
+  const upstream=await listen(createModernDemoServer('browser'),t);
+  const initial={...document,upstreams:[{id:'alpha',url:`${upstream}/mcp`}]};
+  const store=new SqliteStore(':memory:',initial);t.after(()=>store.close());
+  const url=await listen(createRuntime(store,{adminKey:adminToken,environment:{SERVICE_TOKEN:serviceToken}}),t);
+  await store.write({...initial,allowedOrigins:[url]},1);
+  const browser=await launchBrowser();t.after(()=>browser.close());const page=await browser.newPage();page.setDefaultTimeout(5000);
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(`${url}/admin/`);await page.getByLabel('Administrator key').fill(adminToken);await page.getByRole('button',{name:'Connect to gateway'}).click();await page.locator('#workspace').waitFor({state:'visible',timeout:10000});
+  await page.getByRole('button',{name:'Tool explorer'}).click();await page.getByLabel('Service access key').fill(serviceToken);await page.getByRole('button',{name:'Discover tools'}).click();
+  await page.getByRole('heading',{name:'1 permitted tools'}).waitFor({timeout:5000}).catch(async error=>{throw new Error(error.message+' PAGE: '+await page.locator('#content').innerText());});
+  assert.equal(await page.getByLabel('Service access key').inputValue(),'');
+  await page.getByLabel('Arguments for alpha__echo').fill('{"text":"from browser"}');await page.getByRole('button',{name:'Call selected tool'}).click();await page.getByLabel('Result of alpha__echo').filter({hasText:'browser: from browser'}).waitFor().catch(async error=>{throw new Error(error.message+' RESULT: '+await page.getByLabel('Result of alpha__echo').innerText());});
+  await page.getByRole('button',{name:'Pin reviewed definition to draft'}).click();await page.getByRole('button',{name:'Publish changes'}).click();await page.getByText('Revision 3 · connected',{exact:true}).waitFor();
+  assert.match((await store.read()).document.toolContracts.alpha__echo,/^[a-f0-9]{64}$/);assert.deepEqual(errors,[]);
+  assert.equal(await page.evaluate(()=>localStorage.length),0);
+});

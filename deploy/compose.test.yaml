@@ -1,0 +1,26 @@
+name: relay-integration
+services:
+  postgres:
+    image: relay-postgres-test:17-alpine
+    build:
+      context: ..
+      dockerfile: deploy/postgres-test.Dockerfile
+    environment:
+      POSTGRES_USER: gateway_test
+      POSTGRES_PASSWORD: disposable-integration-only
+      POSTGRES_DB: gateway_test
+    ports: ["127.0.0.1:55432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway_test -d gateway_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  openfga:
+    image: openfga/openfga:v1.22.0
+    command: ["run", "--datastore-engine", "memory", "--playground-enabled=false"]
+    ports: ["127.0.0.1:58080:8080"]
+  opa:
+    image: openpolicyagent/opa:1.19.1
+    command: ["run", "--server", "--skip-version-check", "--addr=0.0.0.0:8181", "/policy/authorization.rego"]
+    volumes: ["./opa.integration.rego:/policy/authorization.rego:ro"]
+    ports: ["127.0.0.1:58181:8181"]

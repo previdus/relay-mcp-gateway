@@ -1,0 +1,8 @@
+{
+  "allowLocalHttp": false,
+  "timeoutMs": 5000,
+  "maxConcurrentPerClient": 8,
+  "allowedOrigins": [],
+  "clients": [{ "id": "developer", "tokenEnv": "GATEWAY_API_KEY", "allow": ["example__echo"] }],
+  "upstreams": [{ "id": "example", "url": "https://your-approved-server.example/mcp", "tokenEnv": "UPSTREAM_API_KEY" }]
+}

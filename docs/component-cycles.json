@@ -1,0 +1,128 @@
+[
+  {
+    "id": "authentication-01",
+    "status": "completed",
+    "question": "Can key retrieval or token confusion defeat the ingress profile?",
+    "sources": [
+      "component-article-authentication-01",
+      "component-article-authentication-02",
+      "component-article-authentication-03",
+      "component-article-authentication-04",
+      "component-article-authentication-05"
+    ],
+    "paper_context": "authentication-paper-01",
+    "paper_scope": "Uses the saved selected-body paper review; not a new proof audit.",
+    "decision": "Implemented 64 KiB/64-key remote JWKS limits while retaining jose refresh coalescing and cooldown. Added unsigned, wrong algorithm, invalid signature, redirect and oversized document tests. Retained rejection of unsupported proof-bound tokens.",
+    "validation": "test/jwks-boundary.test.js; test/component-hardening.test.js",
+    "next_question": "How should issuer-specific emergency signing-key removal and JWKS cache refresh coordinate with in-flight requests across replicas?"
+  },
+  {
+    "id": "authentication-02",
+    "status": "completed",
+    "question": "Do delegated credentials preserve recipient/scope constraints under concurrent expiry?",
+    "sources": [
+      "component-article-authentication-06",
+      "component-article-authentication-07",
+      "component-article-authentication-08",
+      "component-article-authentication-09",
+      "component-article-authentication-10"
+    ],
+    "paper_context": "authentication-paper-02",
+    "paper_scope": "Uses the saved selected-body paper review; not a new proof audit.",
+    "decision": "Fixed duplicate refresh exchanges; tightened JSON, bearer syntax, length, returned scope and issued token type checks. Added explicit keyless OAuth subjects and UI support; retained separate interactive identity-provider responsibilities.",
+    "validation": "test/credential-boundary.test.js; test/config.test.js; test/advanced.test.js; integration/browser.test.js",
+    "next_question": "Which upstream client authentication methods and consent contracts need additional provider adapters?"
+  },
+  {
+    "id": "authorization-01",
+    "status": "completed",
+    "question": "Should relationship facts, roles and caller-supplied arguments expand one another\u2019s authority?",
+    "sources": [
+      "component-article-authorization-01",
+      "component-article-authorization-02",
+      "component-article-authorization-03",
+      "component-article-authorization-04",
+      "component-article-authorization-05"
+    ],
+    "paper_context": "authorization-paper-01",
+    "paper_scope": "Uses the saved selected-body paper review; not a new proof audit.",
+    "decision": "Retained strict policy intersection and external model ownership. Added an allow/role/relationship truth-table test and argument/prototype rejection checks. Deferred backend-record authorization until trusted resource binding exists.",
+    "validation": "test/policy-composition.test.js; integration/services.test.js",
+    "next_question": "How can conditional relationship attributes be sourced authoritatively and remain fresh across replicas?"
+  },
+  {
+    "id": "routing-01",
+    "status": "completed",
+    "question": "How can an operator remove a target from alias selection without introducing unsafe failover?",
+    "sources": [
+      "component-article-routing-01",
+      "component-article-routing-02",
+      "component-article-routing-03",
+      "component-article-routing-04",
+      "component-article-routing-05"
+    ],
+    "paper_context": "routing-paper-04",
+    "paper_scope": "Uses the saved selected-body paper review; not a new proof audit.",
+    "decision": "Implemented per-target availability in configuration, built-in routing and UI; continued requests recheck selectors and availability. No automatic replay or least-load claims.",
+    "validation": "test/route-availability.test.js; test/advanced.test.js; integration/browser.test.js",
+    "next_question": "How should health signals, slow-start and explicit direct-access shutdown interact with trusted Router plugins?"
+  },
+  {
+    "id": "reliability-01",
+    "status": "completed",
+    "question": "Can response loss or overload justify retrying a potentially completed action?",
+    "sources": [
+      "component-article-reliability-01",
+      "component-article-reliability-02",
+      "component-article-reliability-03",
+      "reliability-article-01",
+      "reliability-article-02"
+    ],
+    "paper_context": "reliability-paper-03",
+    "paper_scope": "Uses the saved selected-body paper review; not a new proof audit.",
+    "decision": "Retained no automatic tool-effect retries, bounded fan-out, cancellation, rate limits and circuit behavior. Hardened security-service reads and exchange coalescing; deferred retry and outcome reconciliation until backend idempotency is explicit.",
+    "validation": "test/component-hardening.test.js; test/catalog.test.js; test/traffic.test.js; test/credential-boundary.test.js",
+    "next_question": "Which discovery requests can be retried under a shared budget, and which ingress/streaming soak tests expose remaining failure modes?"
+  },
+  {
+    "id": "authentication-03",
+    "status": "completed",
+    "question": "Can an operator stop a compromised but unexpired locally verified JWT across every gateway replica?",
+    "sources": [
+      "https://www.rfc-editor.org/rfc/rfc7519.html#section-4.1.7"
+    ],
+    "paper_context": null,
+    "paper_scope": "Normative JWT claim review; not counted as a research paper or article cycle.",
+    "decision": "Added opt-in shared JWT revocation keyed by issuer and signed jti, with an authenticated admin endpoint, SQLite local support, PostgreSQL shared support, expiry cleanup, fail-closed checks and an atomic revocation-plus-audit transaction. Revocation records contain only a hash; issuer-level key rollover remains a separate control.",
+    "validation": "test/jwt-revocation.test.js; PostgreSQL cross-pool integration pending a Docker-enabled run.",
+    "next_question": "Can a whole-issuer emergency stop contain a compromised provider when per-token revocation is insufficient?"
+  },
+  {
+    "id": "authentication-04",
+    "status": "completed",
+    "question": "Can an emergency signing-key incident be contained without relying on an optional or mutable kid value?",
+    "sources": [
+      "https://www.rfc-editor.org/rfc/rfc7517.html#section-4.5",
+      "https://www.rfc-editor.org/rfc/rfc8725.html#section-3.8"
+    ],
+    "paper_context": null,
+    "paper_scope": "Normative JOSE/JWT best-practice review; not counted as a research paper or article cycle.",
+    "decision": "Added an issuer-wide stop to the shared JWT revocation path so all signed tokens from that configured issuer are blocked regardless of key rotation or token jti. Re-enable is explicit and audited. This avoids trusting mutable or missing kid values while key-thumbprint revocation and JWKS cache invalidation remain open.",
+    "validation": "test/jwt-revocation.test.js; two-pool PostgreSQL coverage added to integration/services.test.js but not run without Docker.",
+    "next_question": "How should targeted key-thumbprint revocation and JWKS refresh avoid ambiguity, stale acceptance and refresh stampedes without requiring an issuer-wide outage?"
+  },
+  {
+    "id": "authentication-05",
+    "status": "completed",
+    "question": "Does the gateway send upstream OAuth client secrets using the recommended client authentication method while preserving explicit provider compatibility?",
+    "sources": [
+      "https://www.rfc-editor.org/rfc/rfc6749.html#section-2.3.1",
+      "https://www.rfc-editor.org/rfc/rfc8693.html#section-2.3"
+    ],
+    "paper_context": null,
+    "paper_scope": "Normative OAuth standards review; not counted as an article or research-paper cycle.",
+    "decision": "Upstream client credentials now use client_secret_basic by default, with RFC-required form encoding before Basic construction. Request-body client_secret is sent only when client_secret_post is explicitly configured for provider compatibility.",
+    "validation": "test/credential-boundary.test.js; test/advanced.test.js; test/enterprise-security.test.js",
+    "next_question": "Can workload identity and asymmetric client authentication be added through a bounded extension without exposing static secrets or weakening destination pins?"
+  }
+]

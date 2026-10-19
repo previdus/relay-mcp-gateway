@@ -1,0 +1,1 @@
+`mtls-test-cert.pem` and `mtls-test-key.pem` are self-signed, public test fixtures used only by `test/mtls.test.js`. The private key is intentionally committed as test data and must never be used by a deployment. Production TLS certificates and client CAs must be mounted from a secret manager.
