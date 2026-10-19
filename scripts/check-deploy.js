@@ -14,6 +14,10 @@ const imageConfig = value(value(value(value(service, 'Properties'), 'SourceConfi
 assert.equal(imageConfig?.constructor.name, 'YAMLMap');
 assert.equal(value(imageConfig, 'RuntimeEnvironmentVariables')?.constructor.name, 'YAMLSeq', 'App Runner environment variables must use list entries');
 assert.equal(value(imageConfig, 'RuntimeEnvironmentSecrets')?.constructor.name, 'YAMLSeq', 'App Runner environment secrets must use list entries');
+const serviceProperties = value(service, 'Properties');
+assert.equal(value(serviceProperties, 'ServiceName')?.value, '${AWS::StackName}-gateway', 'App Runner service names must be stack-scoped for safe parallel recovery');
+const scalingProperties = value(value(resources, 'DemoAutoScaling'), 'Properties');
+assert.equal(value(scalingProperties, 'AutoScalingConfigurationName')?.value, '${AWS::StackName}-scaling', 'App Runner scaling configuration names must be stack-scoped');
 const distributionProperties = value(value(resources, 'WebsiteDistribution'), 'Properties');
 assert.equal(value(distributionProperties, 'Tags')?.constructor.name, 'YAMLSeq', 'CloudFront tags belong on the distribution resource');
 assert.equal(value(value(distributionProperties, 'DistributionConfig'), 'Tags'), undefined, 'CloudFront tags cannot be nested in DistributionConfig');

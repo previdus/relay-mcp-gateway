@@ -77,7 +77,7 @@ Resources:
   DemoAutoScaling:
     Type: AWS::AppRunner::AutoScalingConfiguration
     Properties:
-      AutoScalingConfigurationName: relay-demo-single-instance
+      AutoScalingConfigurationName: !Sub '${AWS::StackName}-scaling'
       MaxConcurrency: 30
       MinSize: 1
       MaxSize: 1
@@ -85,7 +85,7 @@ Resources:
   GatewayService:
     Type: AWS::AppRunner::Service
     Properties:
-      ServiceName: relay-mcp-gateway-demo
+      ServiceName: !Sub '${AWS::StackName}-gateway'
       SourceConfiguration:
         AutoDeploymentsEnabled: false
         AuthenticationConfiguration:
