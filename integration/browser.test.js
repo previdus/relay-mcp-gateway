@@ -308,7 +308,7 @@ test('interactive scenario lab plays allow and deny flows and generates Codex se
   await page.getByRole('img', { name: 'Agent-to-gateway and gateway-to-server mutual TLS' }).waitFor();
   await page.getByRole('option', { name: /mTLS · reject untrusted peer/ }).click();
   await page.getByRole('heading', { name: 'Reject an untrusted agent certificate' }).waitFor();
-  assert.match(await page.locator('#outcome-copy').innerText(), /TLS connection fails/);
+  assert.match(await page.locator('#outcome-copy').innerText(), /TLS rejection before MCP initialization/);
   await page.getByRole('option', { name: /OAuth · reject wrong audience/ }).click();
   await page.getByRole('heading', { name: 'Stop a token issued for another resource' }).waitFor();
   await page.getByRole('option', { name: /Invalid key rejected/ }).click();
