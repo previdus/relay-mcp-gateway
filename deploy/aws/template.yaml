@@ -220,6 +220,7 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
                 token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepository}@${GitHubRepositoryId}:environment:demo'
+                token.actions.githubusercontent.com:ref: 'refs/heads/main'
       Policies:
         - PolicyName: DeployRelayImageAndWebsite
           PolicyDocument:
