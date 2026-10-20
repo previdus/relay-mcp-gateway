@@ -10,6 +10,12 @@ FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
+RUN apk upgrade --no-cache \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+  /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn \
+  /usr/local/bin/yarnpkg /usr/local/bin/pnpm \
+  && node --version \
+  && ! command -v npm
 COPY --from=build /app/dist ./dist
 COPY public ./public
 COPY gateway.config.json ./
