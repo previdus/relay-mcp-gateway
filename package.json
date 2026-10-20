@@ -37,7 +37,7 @@
     "@opentelemetry/resources": "2.12.0",
     "@opentelemetry/sdk-trace-node": "2.12.0",
     "express": "5.1.0",
-    "ipaddr.js": "2.2.0",
+    "ipaddr.js": "2.5.0",
     "jose": "6.2.12",
     "pg": "8.23.1",
     "undici": "7.30.1",
