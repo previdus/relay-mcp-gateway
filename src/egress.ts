@@ -48,6 +48,7 @@ export interface EgressPolicy {
   /** Test seam for deterministic resolution. Production callers should omit it. */
   resolveAddresses?: (hostname: string) => Promise<LookupAddress[]>;
 }
+export interface ClientTlsCredentials { cert: string; key: string; ca?: string }
 
 function deniedAddress(hostname: string): NodeJS.ErrnoException {
   return Object.assign(new Error(`Upstream address denied for ${hostname}`), { code: 'EACCES' });
@@ -102,10 +103,10 @@ export function assertEgressEndpointAllowed(endpoint: string | URL, egress: Egre
 }
 
 /** Restrict every transport HTTP request, including SSE endpoint events, to its configured origin and vetted connect-time DNS answers. */
-export function upstreamFetch(endpoint: string, maximumBytes = 4 * 1024 * 1024, requestPaths?: readonly string[], egress?: EgressPolicy): typeof fetch {
+export function upstreamFetch(endpoint: string, maximumBytes = 4 * 1024 * 1024, requestPaths?: readonly string[], egress?: EgressPolicy, tls?: ClientTlsCredentials): typeof fetch {
   const origin = new URL(endpoint).origin;
   const allowedCidrs = validateEgressCidrs(egress?.allowedPrivateCidrs);
-  const agent = egress ? new Agent({ maxOrigins: 1, connect: { lookup: pinnedEgressLookup(egress) } }) : undefined;
+  const agent = egress || tls ? new Agent({ maxOrigins: 1, connect: { ...(egress ? { lookup: pinnedEgressLookup(egress) } : {}), ...(tls ? { cert: tls.cert, key: tls.key, ...(tls.ca ? { ca: tls.ca } : {}) } : {}) } }) : undefined;
   const guardedFetch: typeof fetch = async (input, init) => {
     const target = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     if (target.origin !== origin || target.username || target.password) throw new Error('Cross-origin upstream request denied');
@@ -142,10 +143,10 @@ export async function closeEgressFetch(fetcher: typeof fetch): Promise<void> {
 }
 
 /** Run one fixed security-service request with the same connect-time DNS pinning as MCP upstreams. */
-export async function withEgressFetch<T>(endpoint: string | URL, maximumBytes: number, egress: EgressPolicy | undefined, operation: (fetcher: typeof fetch) => Promise<T>): Promise<T> {
-  if (!egress) return operation(fetch);
+export async function withEgressFetch<T>(endpoint: string | URL, maximumBytes: number, egress: EgressPolicy | undefined, operation: (fetcher: typeof fetch) => Promise<T>, tls?: ClientTlsCredentials): Promise<T> {
+  if (!egress && !tls) return operation(fetch);
   const url = new URL(endpoint);
-  const fetcher = upstreamFetch(url.href, maximumBytes, [url.pathname], egress);
+  const fetcher = upstreamFetch(url.href, maximumBytes, [url.pathname], egress, tls);
   try { return await operation(fetcher); }
   finally { await closeEgressFetch(fetcher); }
 }

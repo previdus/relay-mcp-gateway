@@ -4,17 +4,44 @@ import { loadConfig } from '../dist/config.js';
 import { ExactCredentialBindings } from '../dist/credential-bindings.js';
 import { ApiKeyAuthenticator } from '../dist/plugins.js';
 import { mappedIdentity } from '../dist/authentication.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const config = {
   clients: [{ id: 'developer', tokenEnv: 'GATEWAY_KEY', allow: ['alpha__echo'] }],
   upstreams: [{ id: 'alpha', url: 'https://example.com/mcp', tokenEnv: 'UPSTREAM_KEY' }]
 };
 const environment = { GATEWAY_KEY: 'long-development-key-123456789', UPSTREAM_KEY: 'separate-upstream-key' };
+const fixtureCertificate = readFileSync(fileURLToPath(new URL('./fixtures/mtls-test-cert.pem', import.meta.url)), 'utf8');
+const fixturePrivateKey = readFileSync(fileURLToPath(new URL('./fixtures/mtls-test-key.pem', import.meta.url)), 'utf8');
 test('resolves separate gateway and upstream credentials', () => {
   const resolved = loadConfig(config, environment);
   assert.equal(resolved.clients[0].token, environment.GATEWAY_KEY);
   assert.equal(resolved.upstreams[0].token, environment.UPSTREAM_KEY);
   assert.equal(config.clients[0].token, undefined);
+});
+test('resolves delegated exchange and outbound mTLS secret references only at their approved destinations', () => {
+  const endpoint = 'https://jira.example/mcp', tokenEndpoint = 'https://identity.example/token';
+  const document = { ...config, upstreams: [{ id: 'alpha', url: endpoint, tls: { clientCertEnv: 'JIRA_CERT', clientKeyEnv: 'JIRA_KEY', caEnv: 'JIRA_CA' }, oauth: { mode: 'token_exchange', tokenEndpoint, clientIdEnv: 'GATEWAY_CLIENT_ID', clientSecretEnv: 'GATEWAY_CLIENT_SECRET', actorTokenEnv: 'GATEWAY_ACTOR_TOKEN', resource: endpoint, scope: 'issues:read' } }] };
+  const env = { ...environment, JIRA_CERT: fixtureCertificate, JIRA_KEY: fixturePrivateKey, JIRA_CA: fixtureCertificate, GATEWAY_CLIENT_ID: 'gateway-client', GATEWAY_CLIENT_SECRET: 'gateway-secret', GATEWAY_ACTOR_TOKEN: 'gateway-actor' };
+  const refs = [
+    ['MCP_UPSTREAM_ALPHA', 'upstream-endpoint', endpoint],
+    ['GATEWAY_CLIENT_SECRET', 'oauth-token', tokenEndpoint],
+    ['GATEWAY_CLIENT_SECRET', 'oauth-recipient', endpoint],
+    ['GATEWAY_ACTOR_TOKEN', 'oauth-token', tokenEndpoint],
+    ...['JIRA_CERT', 'JIRA_KEY', 'JIRA_CA'].map(reference => [reference, 'upstream-tls', endpoint]),
+    ...['JIRA_CERT', 'JIRA_KEY', 'JIRA_CA'].map(reference => [reference, 'oauth-token-tls', tokenEndpoint])
+  ].map(([reference, purpose, destination]) => ({ reference, purpose, endpoint: destination }));
+  const resolved = loadConfig(document, env, new ExactCredentialBindings(refs));
+  assert.deepEqual(resolved.upstreams[0].tls, { clientCert: env.JIRA_CERT, clientKey: env.JIRA_KEY, ca: env.JIRA_CA });
+  assert.equal(resolved.upstreams[0].oauth.actorToken, env.GATEWAY_ACTOR_TOKEN);
+  assert.equal(resolved.upstreams[0].oauth.resource, endpoint);
+  const mtlsOAuth = loadConfig({ ...document, upstreams: [{ ...document.upstreams[0], oauth: { ...document.upstreams[0].oauth, clientAuthMethod: 'tls_client_auth', clientSecretEnv: undefined } }] }, env);
+  assert.equal(mtlsOAuth.upstreams[0].oauth.clientSecret, undefined);
+  assert.throws(() => loadConfig(document, env, new ExactCredentialBindings(refs.filter(binding => binding.reference !== 'JIRA_KEY'))), /not approved/);
+  const systemCa = loadConfig({ ...document, upstreams: [{ ...document.upstreams[0], tls: { clientCertEnv: 'JIRA_CERT', clientKeyEnv: 'JIRA_KEY' } }] }, env);
+  assert.deepEqual(systemCa.upstreams[0].tls, { clientCert: env.JIRA_CERT, clientKey: env.JIRA_KEY, ca: undefined });
+  assert.throws(() => loadConfig({ ...document, upstreams: [{ ...document.upstreams[0], oauth: { ...document.upstreams[0].oauth, mode: 'client_credentials' } }] }, env), /Actor tokens are valid only/);
 });
 test('resolves vendor-specific outbound headers only when their exact secret destinations are approved', () => {
   const endpoint = 'https://jira.example/mcp';

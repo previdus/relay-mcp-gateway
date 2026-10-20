@@ -6,6 +6,12 @@ Use `createRuntime(store, {plugins: config => ({...})})` to install compiled dep
 
 ## Inspection extension
 
+## Per-principal upstream credentials
+
+The `CredentialProvider` may optionally implement `tls(upstream, principal)` to obtain a caller-specific certificate/key from a deployment-owned vault or short-lived workload identity issuer. The returned identity is used only for the selected upstream HTTPS connection and its configured OAuth token endpoint. `headers(upstream, principal, subjectToken, tls)` receives the same TLS identity so certificate-bound OAuth exchange can use the same key pair at issuance and resource access. The default provider reads static, exact-destination-bound PEM references from gateway configuration. Never derive the destination from caller data; the selected upstream is already resolved and validated before credential acquisition.
+
+Credential plugins are trusted code and receive the authenticated principal. They should return only credentials for that principal and upstream, avoid persistence/logging of bearer tokens or private keys, use bounded fetches and honor request deadlines. For per-user OAuth access, prefer a token broker or RFC 8693 exchange with a target `resource`, rather than copying the inbound token into an upstream request.
+
 ```ts
 import { createGateway, PLUGIN_API_VERSION, type ToolInspector } from './dist/gateway.js';
 

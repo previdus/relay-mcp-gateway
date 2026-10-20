@@ -7,7 +7,7 @@ const output = resolve(root, 'website', 'dist');
 const requiredFiles = ['README.md', 'LICENSE', 'CONTRIBUTING.md', 'SECURITY.md', 'CHANGELOG.md'];
 
 await mkdir(output, { recursive: true });
-for (const file of ['index.html', 'docs.html', 'styles.css', 'visuals.css', 'site.js', 'docs.js']) {
+for (const file of ['index.html', 'docs.html', 'lab.html', 'styles.css', 'visuals.css', 'site.js', 'docs.js', 'lab.js', 'lab.css']) {
   await writeFile(resolve(output, file), await readFile(resolve(root, 'website', file)));
 }
 for (const file of requiredFiles) {
@@ -24,7 +24,7 @@ if (configuredEndpoint) {
   }
   endpointValue = endpoint.href.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
 }
-for (const page of ['index.html', 'docs.html']) {
+for (const page of ['index.html', 'docs.html', 'lab.html']) {
   let html = await readFile(resolve(output, page), 'utf8');
   html = html.replaceAll('__RELAY_MCP_ENDPOINT__', endpointValue);
   await writeFile(resolve(output, page), html);

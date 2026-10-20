@@ -1,5 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import https from 'node:https';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { once } from 'node:events';
 import express from 'express';
 import { listen } from './helpers.js';
 import { closeEgressFetch, upstreamFetch, validateEgressCidrs } from '../dist/egress.js';
@@ -20,6 +24,24 @@ test('upstream fetch bounds both declared and streamed response sizes', async t 
   await assert.rejects(request(`${url}/declared`), /byte limit/);
   const response = await request(`${url}/stream`);
   await assert.rejects(response.text(), /byte limit/);
+});
+
+test('upstream fetch presents a dedicated client certificate only on its configured upstream TLS connection', async t => {
+  const cert = await readFile(fileURLToPath(new URL('./fixtures/mtls-test-cert.pem', import.meta.url)));
+  const key = await readFile(fileURLToPath(new URL('./fixtures/mtls-test-key.pem', import.meta.url)));
+  let peerAuthorized = false;
+  const server = https.createServer({ cert, key, ca: cert, requestCert: true, rejectUnauthorized: true }, (req, res) => {
+    peerAuthorized = req.socket.authorized;
+    res.end('mTLS upstream accepted');
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const url = `https://localhost:${server.address().port}/mcp`;
+  const fetcher = upstreamFetch(url, undefined, ['/mcp'], undefined, { cert: cert.toString(), key: key.toString(), ca: cert.toString() });
+  t.after(() => closeEgressFetch(fetcher));
+  const response = await fetcher(url);
+  assert.equal(await response.text(), 'mTLS upstream accepted');
+  assert.equal(peerAuthorized, true);
 });
 
 test('strict egress validates all DNS answers and pins the vetted answer into the socket connection', async t => {

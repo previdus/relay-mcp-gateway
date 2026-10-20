@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
+import https from 'node:https';
+import { readFile } from 'node:fs/promises';
+import { once } from 'node:events';
 import { Server, createMcpHandler, inputRequired, UriTemplate } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
@@ -10,6 +13,7 @@ import { createModernDemoServer } from '../dist/demo-modern.js';
 import { templateUri } from '../dist/resource-names.js';
 import { listen, serviceToken } from './helpers.js';
 import { OAuthCredentialProvider } from '../dist/credentials.js';
+import { createUpstreamTransport } from '../dist/transports.js';
 import { fileURLToPath } from 'node:url';
 const stateKey = 'shared-continuation-key-at-least-32-characters';
 async function clientFor(url, t, token = serviceToken, capabilities = {}) {
@@ -67,6 +71,34 @@ test('custom routers may select any enabled target in the administrator-configur
   const client = await clientFor(gateway, t);
   assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ['echo']);
   assert.equal((await client.callTool({ name: 'echo', arguments: { text: 'approved target' } })).content[0].text, 'beta: approved target');
+});
+test('credential plugin receives the authenticated principal and scopes dynamic upstream TLS to the selected transport', async t => {
+  const cert = await readFile(fileURLToPath(new URL('./fixtures/mtls-test-cert.pem', import.meta.url)));
+  const key = await readFile(fileURLToPath(new URL('./fixtures/mtls-test-key.pem', import.meta.url)));
+  const upstreamServer = https.createServer({ cert, key, ca: cert, requestCert: true, rejectUnauthorized: true }, createModernDemoServer('credential-plugin'));
+  upstreamServer.listen(0, '127.0.0.1'); await once(upstreamServer, 'listening');
+  t.after(() => new Promise(resolve => upstreamServer.close(resolve)));
+  const upstreamUrl = `https://localhost:${upstreamServer.address().port}`;
+  const clientIdentity = { id: 'tls-agent', token: serviceToken, allow: ['alpha__echo'] };
+  const config = { clients: [clientIdentity], upstreams: [{ id: 'alpha', url: `${upstreamUrl}/mcp` }] };
+  const tls = { cert: cert.toString(), key: key.toString(), ca: cert.toString() };
+  let tlsIdentity, requestedHeaders;
+  const gateway = await listen(createGateway(config, {
+    credentials: {
+      async tls(upstream, principal) { assert.equal(upstream.id, 'alpha'); assert.equal(principal?.id, 'tls-agent'); return tls; },
+      async headers(upstream, principal, subjectToken, tls) { requestedHeaders = { upstream: upstream.id, principal: principal?.id, subjectToken, tls }; return {}; }
+    },
+    transportFactory(upstream, context) {
+      assert.equal(upstream.id, 'alpha');
+      assert.equal(context?.principal?.id, 'tls-agent');
+      tlsIdentity = context?.tls;
+      return createUpstreamTransport(upstream, {}, undefined, undefined, context?.tls);
+    }
+  }), t);
+  const client = await clientFor(gateway, t);
+  assert.equal((await client.callTool({ name: 'alpha__echo', arguments: { text: 'delegated identity' } })).content[0].text, 'credential-plugin: delegated identity');
+  assert.deepEqual(requestedHeaders, { upstream: 'alpha', principal: 'tls-agent', subjectToken: undefined, tls });
+  assert.deepEqual(tlsIdentity, tls);
 });
 test('routed alias invocation rechecks every live target contract after discovery', async t => {
   const schema = { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] };

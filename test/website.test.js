@@ -11,6 +11,9 @@ test('website build contains a product story, sourced comparison and complete do
   const css = await readFile(resolve(root, 'website/dist/styles.css'), 'utf8');
   const siteJs = await readFile(resolve(root, 'website/dist/site.js'), 'utf8');
   const docsJs = await readFile(resolve(root, 'website/dist/docs.js'), 'utf8');
+  const lab = await readFile(resolve(root, 'website/dist/lab.html'), 'utf8');
+  const labJs = await readFile(resolve(root, 'website/dist/lab.js'), 'utf8');
+  const labCss = await readFile(resolve(root, 'website/dist/lab.css'), 'utf8');
   const visuals = await readFile(resolve(root, 'website/dist/visuals.css'), 'utf8');
   assert.match(html, /class="hero-visual reveal"/);
   assert.match(html, /id="security"/);
@@ -20,6 +23,16 @@ test('website build contains a product story, sourced comparison and complete do
   assert.match(html, /GRAVITEE/);
   assert.match(html, /KRAKEND/);
   assert.match(html, /id="hosted-mcp-link"/);
+  assert.match(html, /href="lab.html"/);
+  for (const demo of ['jira', 'aws', 'gmail', 'slack', 'drive', 'logs', 'github', 'calendar', 'database', 'observability']) assert.match(`${lab}\n${labJs}`, new RegExp(demo, 'i'));
+  for (const scenario of ['incident', 'read', 'deny', 'bad-auth', 'route', 'mtls', 'mtls-deny', 'oauth', 'oauth-deny', 'approval']) assert.match(labJs, new RegExp(`id: '${scenario}'`));
+  assert.match(lab, /Agent-to-gateway and gateway-to-server mutual TLS/);
+  assert.match(lab, /private key never crosses the gateway/i);
+  assert.match(lab, /Public demo keys are intentionally public/);
+  assert.match(labJs, /http_headers =/);
+  assert.match(labJs, /Stopped before upstream/);
+  assert.match(labJs, /npm run test:mtls/);
+  assert.match(labCss, /prefers-reduced-motion/);
   assert.match(html, /data-cap="authorization"/);
   assert.match(html, /Relay’s strongest case/);
   for (const visual of ['value-journey', 'cap-map', 'secret-branch', 'compare-flow', 'deployment-map', 'quick-steps', 'proof-path', 'community-orbit']) {
@@ -74,5 +87,6 @@ test('website build contains a product story, sourced comparison and complete do
   assert.match(visuals, /@keyframes docs-map-flow/);
   await access(resolve(root, 'website/dist/README.md'));
   await access(resolve(root, 'website/dist/docs/coverage.md'));
+  await access(resolve(root, 'website/dist/docs/demo-lab.md'));
 });
 

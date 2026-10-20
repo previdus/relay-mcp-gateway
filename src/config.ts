@@ -69,7 +69,8 @@ export const configSchema = z.object({
     command: z.string().optional(),
     args: z.array(z.string()).max(100).optional(),
     envRefs: z.record(environmentKey).optional(),
-    oauth: z.object({ mode: z.enum(['client_credentials', 'token_exchange']), clientAuthMethod: z.enum(['client_secret_basic', 'client_secret_post']).optional(), tokenEndpoint: z.string().url(), clientIdEnv: environmentKey, clientSecretEnv: environmentKey, scope: z.string().optional(), audience: z.string().optional() }).strict().optional()
+    oauth: z.object({ mode: z.enum(['client_credentials', 'token_exchange']), clientAuthMethod: z.enum(['client_secret_basic', 'client_secret_post', 'tls_client_auth', 'self_signed_tls_client_auth']).optional(), tokenEndpoint: z.string().url(), clientIdEnv: environmentKey, clientSecretEnv: environmentKey.optional(), actorTokenEnv: environmentKey.optional(), actorTokenType: z.enum(['urn:ietf:params:oauth:token-type:access_token', 'urn:ietf:params:oauth:token-type:jwt']).optional(), scope: z.string().optional(), audience: z.string().optional(), resource: z.string().url().optional() }).strict().optional(),
+    tls: z.object({ clientCertEnv: environmentKey, clientKeyEnv: environmentKey, caEnv: environmentKey.optional() }).strict().optional()
   }).strict()).max(100)
 }).strict();
 
@@ -92,9 +93,14 @@ export function loadConfig(input: unknown, environment: NodeJS.ProcessEnv = proc
       for (const reference of Object.values(upstream.headerEnvRefs)) bindings?.assertAllowed(reference, upstream.url, 'upstream');
     }
     if (upstream.oauth) {
-      bindings?.assertAllowed(upstream.oauth.clientSecretEnv, upstream.oauth.tokenEndpoint, 'oauth-token');
-      bindings?.assertAllowed(upstream.oauth.clientSecretEnv, upstream.url, 'oauth-recipient');
+      if (upstream.oauth.clientSecretEnv) {
+        bindings?.assertAllowed(upstream.oauth.clientSecretEnv, upstream.oauth.tokenEndpoint, 'oauth-token');
+        bindings?.assertAllowed(upstream.oauth.clientSecretEnv, upstream.url, 'oauth-recipient');
+      }
+      if (upstream.oauth.actorTokenEnv) bindings?.assertAllowed(upstream.oauth.actorTokenEnv, upstream.oauth.tokenEndpoint, 'oauth-token');
+      if (upstream.tls) for (const reference of [upstream.tls.clientCertEnv, upstream.tls.clientKeyEnv, ...(upstream.tls.caEnv ? [upstream.tls.caEnv] : [])]) bindings?.assertAllowed(reference, upstream.oauth.tokenEndpoint, 'oauth-token-tls');
     }
+    if (upstream.tls) for (const reference of [upstream.tls.clientCertEnv, upstream.tls.clientKeyEnv, ...(upstream.tls.caEnv ? [upstream.tls.caEnv] : [])]) bindings?.assertAllowed(reference, upstream.url, 'upstream-tls');
     for (const reference of Object.values(upstream.envRefs ?? {})) {
       const target = upstream.transport === 'stdio' && upstream.command ? new URL(`stdio://${upstream.id}/${encodeURIComponent(upstream.command)}`).href : upstream.url;
       bindings?.assertAllowed(reference, target, 'stdio-environment');
@@ -103,7 +109,8 @@ export function loadConfig(input: unknown, environment: NodeJS.ProcessEnv = proc
     for (const path of upstream.requestPaths ?? []) {
       if (upstream.tokenEnv) bindings?.assertAllowed(upstream.tokenEnv, new URL(path, upstream.url).href, 'upstream');
       if (upstream.headerEnvRefs) for (const reference of Object.values(upstream.headerEnvRefs)) bindings?.assertAllowed(reference, new URL(path, upstream.url).href, 'upstream');
-      if (upstream.oauth) bindings?.assertAllowed(upstream.oauth.clientSecretEnv, new URL(path, upstream.url).href, 'oauth-recipient');
+      if (upstream.oauth?.clientSecretEnv) bindings?.assertAllowed(upstream.oauth.clientSecretEnv, new URL(path, upstream.url).href, 'oauth-recipient');
+      if (upstream.tls) for (const reference of [upstream.tls.clientCertEnv, upstream.tls.clientKeyEnv, ...(upstream.tls.caEnv ? [upstream.tls.caEnv] : [])]) bindings?.assertAllowed(reference, new URL(path, upstream.url).href, 'upstream-tls');
     }
   }
   function credential(key: string): string {
@@ -114,6 +121,6 @@ export function loadConfig(input: unknown, environment: NodeJS.ProcessEnv = proc
   return validateConfig({
     ...raw,
     clients: raw.clients.map(({ tokenEnv, ...client }) => ({ ...client, ...(tokenEnv ? { token: credential(tokenEnv) } : {}) })),
-    upstreams: raw.upstreams.map(({ tokenEnv, headerEnvRefs, envRefs, oauth, ...upstream }) => ({ ...upstream, ...(tokenEnv ? { token: credential(tokenEnv) } : {}), ...(headerEnvRefs ? { headers: Object.fromEntries(Object.entries(headerEnvRefs).map(([name, ref]) => { const value = credential(ref); if (/[\r\n\0]/.test(value) || Buffer.byteLength(value) > 8192) throw new Error('Invalid upstream header credential'); return [name, value]; })) } : {}), ...(envRefs ? { environment: Object.fromEntries(Object.entries(envRefs).map(([name, ref]) => [name, credential(ref)])) } : {}), ...(oauth ? { oauth: { mode: oauth.mode, clientAuthMethod: oauth.clientAuthMethod ?? 'client_secret_basic', tokenEndpoint: oauth.tokenEndpoint, scope: oauth.scope, audience: oauth.audience, clientId: credential(oauth.clientIdEnv), clientSecret: credential(oauth.clientSecretEnv) } } : {}) }))
+    upstreams: raw.upstreams.map(({ tokenEnv, headerEnvRefs, envRefs, oauth, tls, ...upstream }) => ({ ...upstream, ...(tokenEnv ? { token: credential(tokenEnv) } : {}), ...(headerEnvRefs ? { headers: Object.fromEntries(Object.entries(headerEnvRefs).map(([name, ref]) => { const value = credential(ref); if (/[\r\n\0]/.test(value) || Buffer.byteLength(value) > 8192) throw new Error('Invalid upstream header credential'); return [name, value]; })) } : {}), ...(envRefs ? { environment: Object.fromEntries(Object.entries(envRefs).map(([name, ref]) => [name, credential(ref)])) } : {}), ...(oauth ? { oauth: { mode: oauth.mode, clientAuthMethod: oauth.clientAuthMethod ?? 'client_secret_basic', tokenEndpoint: oauth.tokenEndpoint, scope: oauth.scope, audience: oauth.audience, resource: oauth.resource, actorTokenType: oauth.actorTokenType, actorToken: oauth.actorTokenEnv ? credential(oauth.actorTokenEnv) : undefined, clientId: credential(oauth.clientIdEnv), clientSecret: oauth.clientSecretEnv ? credential(oauth.clientSecretEnv) : undefined } } : {}), ...(tls ? { tls: { clientCert: credential(tls.clientCertEnv), clientKey: credential(tls.clientKeyEnv), ca: tls.caEnv ? credential(tls.caEnv) : undefined } } : {}) }))
   });
 }

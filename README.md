@@ -76,7 +76,16 @@ Open `http://127.0.0.1:3000/admin/` and enter the generated **admin key** printe
 
 
 
-The demo starts a legacy MCP upstream, a modern upstream, and safe local simulations for Jira, AWS, Gmail, Slack, Google Drive, and application logs. Product-like tools are exposed with names such as `jira__search`, `aws__cloudwatch_logs`, and `gmail__create_draft`; the `enterprise_search` alias demonstrates priority routing across multiple servers. Simulated writes return previews and never touch real accounts. All demo data is synthetic. The in-memory database is discarded and demo keys rotate on restart.
+The demo starts legacy and modern MCP upstreams plus synthetic Jira, AWS/CloudWatch, Gmail, Slack, Drive, logs, GitHub, Calendar, read-only database, and observability servers. A linked incident dataset can be followed across those backends. The hosted [interactive demo lab](website/lab.html) walks through allowed reads, denied writes, invalid credentials, routing, OAuth audience exchange, and the two separate mTLS hops. OAuth, mTLS, and approval flows are labeled as architecture/local-validation paths when they need customer-owned credentials or an external reviewer. Local demo keys rotate on restart; public AWS demo keys are fixed synthetic-only identities. Preview writes never contact real accounts.
+
+Call the local or hosted gateway directly with the MCP client included in this repository:
+
+```sh
+npm run demo:call -- --url http://127.0.0.1:3000/mcp --token "$MCP_DEMO_TOKEN" --list
+npm run demo:call -- --url http://127.0.0.1:3000/mcp --token "$MCP_DEMO_TOKEN" --tool jira__search --args '{"query":"checkout"}'
+```
+
+See the [scenario lab guide](docs/demo-lab.md) for Codex setup, identities, sample records, and the testable limits of each security walkthrough.
 
 See [MCP server interoperability and integration limits](docs/integration-compatibility.md) for supported transports/capabilities, vendor authentication patterns, and the remaining OAuth account-linking boundary.
 
@@ -270,7 +279,7 @@ The console contains server definitions, not live upstream health or availabilit
 
 - Opt-in modern notification streams (`features.notifications`), including legacy upstream event adapters. Streams close on configuration changes and have a bounded lifetime; clients must reconnect. They are not durable event logs.
 
-- Upstream OAuth client credentials or RFC 8693 exchange. Configure `oauth.mode`, `tokenEndpoint`, `clientIdEnv`, `clientSecretEnv`, and optional `scope`/`audience`. Client authentication defaults to `client_secret_basic`; set `clientAuthMethod: "client_secret_post"` only for a token service that requires body credentials. Exchange requires a verified JWT principal; inbound credentials are never forwarded directly. Interactive upstream authorization/refresh flows are not implemented.
+- Upstream OAuth client credentials or RFC 8693 exchange. Configure `oauth.mode`, `tokenEndpoint`, `clientIdEnv`, `clientSecretEnv`, and optional `scope`, `audience` or RFC 8707 `resource`. Exchange can carry a secret-referenced RFC 8693 `actor_token` to let the issuer record the gateway as the acting party. Client authentication defaults to `client_secret_basic`; set `clientAuthMethod: "client_secret_post"` only for a token service that requires body credentials. Exchange requires a verified JWT principal; inbound credentials are never blindly forwarded to an MCP server. Outbound upstream mTLS uses an independent secret-referenced client certificate/key, optionally resolved per principal by a trusted `CredentialProvider`. Inbound client certificates are verified at the gateway and are not transferable to the upstream.
 
 - Stdio upstreams with explicit `command`, `args` and secret `envRefs`. The deployment must approve the absolute executable in semicolon-separated `STDIO_ALLOWED_COMMANDS`. Set `url` to `stdio://server-id`; workers run per operation. Stdio executes trusted administrator-selected programs and is not a sandbox. The UI supports transport, executable, arguments and tenant fields; OAuth and advanced policy settings use the configuration editor.
 

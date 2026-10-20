@@ -1,6 +1,6 @@
 # AWS demo deployment
 
-This deployment is a public, low-traffic **demo**, not a production tenant. It serves the static Relay website through a private S3 bucket and CloudFront, and runs the gateway with synthetic Jira, AWS/CloudWatch, Gmail, Slack, Drive, and log MCP upstreams on AWS App Runner. The public client can use only these local fixtures and safe preview actions; it cannot reach customer accounts. The administrator key is generated into AWS Secrets Manager; the demo database is in memory and resets when App Runner replaces its instance.
+This deployment is a public, low-traffic **demo**, not a production tenant. It serves the static Relay website through a private S3 bucket and CloudFront, and runs the gateway with synthetic Jira, AWS/CloudWatch, Gmail, Slack, Drive, logs, GitHub, Calendar, database, and observability MCP upstreams on AWS App Runner. The public reader and operator identities can use only these fixtures; preview actions cannot reach customer accounts. The administrator key is generated into AWS Secrets Manager; the demo database is in memory and resets when App Runner replaces its instance. The hosted [scenario lab](../website/lab.html) provides Codex configuration and direct MCP-call instructions.
 
 ## Region and cost controls
 
@@ -20,7 +20,7 @@ $env:AWS_REGION = "us-east-1"
 ./deploy/aws/deploy.ps1
 ```
 
-The script builds the container and website, creates or reuses the ECR image repository, pushes the demo image, creates the CloudFormation stack, reads the random App Runner URL, then updates the gateway host allowlist before uploading the site. It prints the site URL, MCP URL, administrator secret ARN and stack name. Retrieve the admin key only in your AWS Console or through `secretsmanager:GetSecretValue`; never put it in a public issue or website. The demo service key is public by design and only permits synthetic fixture tools and the `enterprise_search` route; create/draft/post tools return previews and never perform external actions.
+The script builds the container and website, creates or reuses the ECR image repository, pushes the demo image, creates the CloudFormation stack, reads the random App Runner URL, then updates the gateway host allowlist before uploading the site. It prints the site URL, MCP URL, administrator secret ARN and stack name. Retrieve the admin key only in your AWS Console or through `secretsmanager:GetSecretValue`; never put it in a public issue or website. The reader and operator service keys are public by design and work only with synthetic fixture tools; write-shaped tools return previews and have no external effect. Do not put production credentials into the hosted demo.
 
 The first CloudFront distribution can take several minutes to become available. `deploy.ps1 -WhatIf` validates required local tools and shows the planned stack parameters without creating cloud resources.
 

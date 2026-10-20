@@ -18,6 +18,7 @@ import { sameTenant, tenantConfig } from './tenancy.js';
 import { ContinuationCodec, callbackCapabilities, callBinding, stateFor, wrapInput } from './continuations.js';
 import { rewriteResourceLinks } from './resource-names.js';
 import { OAuthCredentialProvider, type CredentialProvider } from './credentials.js';
+import type { ClientTlsCredentials } from './egress.js';
 import { createUpstreamTransport } from './transports.js';
 import type { EgressPolicy } from './egress.js';
 import { DpopNonceRequired } from './dpop.js';
@@ -54,7 +55,7 @@ export interface GatewayPlugins {
   configurationRevision?: number;
   audit?: AuditSink; authenticator?: Authenticator; authorizer?: Authorizer; router?: Router; limiter?: ConcurrencyLimiter;
   requireAudit?: boolean;
-  transportFactory?: (upstream: Upstream) => Transport;
+  transportFactory?: (upstream: Upstream, context?: { principal?: import('./types.js').ServiceClient; tls?: ClientTlsCredentials }) => Transport;
   egressPolicy?: EgressPolicy;
   resourceMetadataUrl?: string;
   stateKey?: string;
@@ -130,7 +131,10 @@ export function createGateway(input: GatewayConfig, plugins: GatewayPlugins = {}
     const caller = credentialContext.getStore();
     const principal = bridge?.principal ?? caller?.principal;
     const clientCapabilities = bridge && continuation ? callbackCapabilities(bridge.principal, bridge.ctx) : {};
-    const credentialHeaders = await withinDeadline(credentials.headers(upstream, principal, caller?.token), signal);
+    const transportTls = upstream.transport === 'stdio' ? undefined : await withinDeadline(credentials.tls ? credentials.tls(upstream, principal) : Promise.resolve(upstream.tls ? { cert: upstream.tls.clientCert, key: upstream.tls.clientKey, ...(upstream.tls.ca ? { ca: upstream.tls.ca } : {}) } : undefined), signal);
+    if (transportTls && new URL(upstream.url).protocol !== 'https:') throw new Error('Upstream client TLS requires HTTPS');
+    const delegationToken = principal?.authScheme === 'jwt' ? caller?.token : undefined;
+    const credentialHeaders = await withinDeadline(credentials.headers(upstream, principal, delegationToken, transportTls), signal);
     signal.throwIfAborted();
     const headers = { ...traceHeaders(), ...credentialHeaders };
     // The v2 SDK lets a host supply its recent protocol-era verdict and skip a
@@ -143,12 +147,12 @@ export function createGateway(input: GatewayConfig, plugins: GatewayPlugins = {}
       plugins.configurationRevision ?? null,
       principal && [principal.id, principal.tenantId ?? null, principal.subject ?? null, principal.oauthClientId ?? null, principal.authScheme ?? null],
       clientCapabilities,
-      Object.entries(credentialHeaders).sort(([a], [b]) => a.localeCompare(b)),
+      Object.entries(credentialHeaders).sort(([a], [b]) => a.localeCompare(b)), transportTls,
     ])).digest('hex');
     const cacheDiscovery = !plugins.transportFactory && upstream.transport !== 'sse' && upstream.discoveryCacheTtlMs !== undefined;
     const prior = cacheDiscovery ? discoveryCache.get(cacheKey) : undefined;
     const makeClient = () => new Client({ name: 'gateway-upstream', version: '0.12.0' }, { capabilities: clientCapabilities, versionNegotiation: { mode: upstream.transport === 'sse' ? 'legacy' : 'auto', probe: { timeoutMs: connectTimeout, maxRetries: 0 } } });
-    const makeTransport = () => plugins.transportFactory?.(upstream) ?? createUpstreamTransport(upstream, headers, config.maxUpstreamResponseBytes, plugins.egressPolicy);
+    const makeTransport = () => plugins.transportFactory?.(upstream, { principal, tls: transportTls }) ?? createUpstreamTransport(upstream, headers, config.maxUpstreamResponseBytes, plugins.egressPolicy, transportTls);
     let client = makeClient();
     const baseTransport = makeTransport();
     const rawTransport = config.features?.tasks && !plugins.transportFactory && (upstream.transport ?? 'streamable-http') === 'streamable-http' ? new RawTaskTransport(baseTransport) : undefined;

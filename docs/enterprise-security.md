@@ -44,6 +44,39 @@ The gateway accepts secrets through environment references so operators can inje
 
 For upstream OAuth client-credentials and token-exchange grants, client authentication defaults to `client_secret_basic`: the secret is form-encoded with the client identifier and sent in HTTP Basic, separate from the grant body. `oauth.clientAuthMethod: "client_secret_post"` is an explicit compatibility option for providers that require request-body authentication. Both paths remain bound to the configured token endpoint; Basic is the preferred interoperable choice under [RFC 6749 §2.3.1](https://www.rfc-editor.org/rfc/rfc6749.html#section-2.3.1), and RFC 8693's exchange example uses it as well.
 
+## Per-user delegation and mTLS
+
+Do not copy the gateway's inbound bearer token to an arbitrary upstream. The MCP authorization specification requires audience validation and says MCP servers must not accept or transit tokens issued for other resources. Configure an OAuth token exchange to obtain a token for the actual downstream MCP resource instead:
+
+```json
+{
+  "id": "jira",
+  "url": "https://jira.example/mcp",
+  "oauth": {
+    "mode": "token_exchange",
+    "tokenEndpoint": "https://identity.example/token",
+    "clientIdEnv": "GATEWAY_CLIENT_ID",
+    "clientSecretEnv": "GATEWAY_CLIENT_SECRET",
+    "actorTokenEnv": "GATEWAY_ACTOR_TOKEN",
+    "resource": "https://jira.example/mcp",
+    "scope": "issues:read"
+  },
+  "tls": {
+    "clientCertEnv": "JIRA_CLIENT_CERT_PEM",
+    "clientKeyEnv": "JIRA_CLIENT_KEY_PEM",
+    "caEnv": "JIRA_SERVER_CA_PEM"
+  }
+}
+```
+
+`resource` is sent as RFC 8707's token-request parameter. `actorTokenEnv` is optional RFC 8693 actor evidence; it is sent only to the configured token endpoint and is accepted only with token exchange. The authorization server decides whether it will issue the downstream token and which delegated scope it carries. The resulting bearer token is sent only to this upstream. Configure exact deployment credential bindings with purpose `oauth-token` for the actor token, `oauth-token-tls` for the certificate/key/CA at the token endpoint, and `upstream-tls` for those TLS references at each upstream endpoint and allowed request path.
+
+For RFC 8705 OAuth client-certificate authentication at the token endpoint, set `oauth.clientAuthMethod` to `tls_client_auth` (PKI-issued client cert) or `self_signed_tls_client_auth` (registered self-signed cert), provide the matching `tls` certificate/key references, and omit `clientSecretEnv`. The gateway sends `client_id` in the form body and authenticates the token request with that TLS certificate. It reuses the same certificate for the configured MCP upstream. When the authorization server also issues a certificate-bound token, the resource server can verify that token against the certificate presented on this upstream connection.
+
+The `tls` configuration presents a gateway-owned client identity on the upstream HTTPS connection and, when configured, the OAuth token endpoint connection. This works with RFC 8705 certificate-bound access tokens when the authorization server binds the issued token to this same certificate and the MCP resource checks the binding. It does not forward the agent's inbound certificate or private key. When credentials are user-specific, implement the optional `CredentialProvider.tls(upstream, principal)` and use a managed vault or short-lived certificate issuer; the default configured PEM references are shared across callers of that upstream.
+
+An inbound mTLS certificate authenticates the agent to Relay only. The gateway maps its verified certificate fingerprint to the configured identity, applies the same per-tool authorization, and then connects using the independently configured upstream identity. If an upstream needs an identity assertion for that user rather than a shared gateway certificate, use a trusted identity-aware credential provider or token exchange supported by your identity system. A fingerprint alone is not cryptographic proof for the next TLS hop.
+
 Destination pins do not prevent IP routing changes, compromised destination services, or a trusted plugin from making its own network request. Enforce egress at the network layer too: allow only approved service identities/private endpoints, block cloud metadata ranges, validate DNS in the egress proxy, and apply Kubernetes NetworkPolicy, cloud security groups/firewalls, or equivalent on-prem controls. The application guard covers the built-in PostgreSQL pool and OTLP HTTP trace exporter, but not arbitrary plugin-owned outbound connections. Strict PostgreSQL mode requires TCP and `sslmode=verify-full`; weaker modes are rejected and Unix-domain socket URLs are unsupported. For a private database CA, configure `sslrootcert` in `DATABASE_URL` and mount the CA through the deployment's secret or trust configuration. PostgreSQL verifies the CA chain and the original database hostname, even though the socket connects to the pinned IP. Strict telemetry mode uses a non-keepalive agent because the pinned exporter transport does not expose agent cleanup.
 
 ## Extension and performance contract

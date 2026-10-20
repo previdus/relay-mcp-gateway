@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import express from 'express';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createRuntime } from '../dist/runtime.js';
 import { SqliteStore } from '../dist/store.js';
 import { listen, document, adminToken, serviceToken } from '../test/helpers.js';
@@ -29,6 +31,26 @@ test('console explains setup flow and groups configuration fields with examples'
   await page.locator('.raw-config summary').click();
   await page.getByLabel('Gateway configuration JSON').waitFor();
   assert.deepEqual(errors, []);
+});
+
+test('console configures delegated OAuth resource, actor token and outbound mTLS references', async t => {
+  const certificate = readFileSync(fileURLToPath(new URL('../test/fixtures/mtls-test-cert.pem', import.meta.url)), 'utf8');
+  const privateKey = readFileSync(fileURLToPath(new URL('../test/fixtures/mtls-test-key.pem', import.meta.url)), 'utf8');
+  const initial = { ...document, upstreams: [{ id: 'jira', url: 'https://jira.example/mcp' }] };
+  const environment = { SERVICE_TOKEN: serviceToken, JIRA_CLIENT_ID: 'gateway-client', JIRA_CLIENT_SECRET: 'gateway-secret', JIRA_ACTOR_TOKEN: 'gateway-actor', JIRA_CLIENT_CERT: certificate, JIRA_CLIENT_KEY: privateKey, JIRA_SERVER_CA: certificate };
+  const store = new SqliteStore(':memory:', initial); t.after(() => store.close());
+  const url = await listen(createRuntime(store, { adminKey: adminToken, environment }), t);
+  const browser = await launchBrowser(); t.after(() => browser.close());
+  const page = await browser.newPage(); const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${url}/admin/`); await page.getByLabel('Administrator key').fill(adminToken); await page.getByRole('button', { name: 'Connect to gateway' }).click();
+  await page.getByRole('button', { name: 'Upstream servers' }).click(); await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByLabel('Outbound OAuth policy (JSON; optional)').fill(JSON.stringify({ mode: 'token_exchange', tokenEndpoint: 'https://identity.example/token', clientIdEnv: 'JIRA_CLIENT_ID', clientSecretEnv: 'JIRA_CLIENT_SECRET', actorTokenEnv: 'JIRA_ACTOR_TOKEN', resource: 'https://jira.example/mcp', scope: 'issues:read' }));
+  await page.getByLabel('Outbound mTLS secret references (JSON; optional)').fill(JSON.stringify({ clientCertEnv: 'JIRA_CLIENT_CERT', clientKeyEnv: 'JIRA_CLIENT_KEY', caEnv: 'JIRA_SERVER_CA' }));
+  await page.getByRole('button', { name: 'Apply to draft' }).click(); await page.getByRole('button', { name: 'Publish changes' }).click();
+  await page.getByText('Revision 2 · connected', { exact: true }).waitFor();
+  const saved = (await store.read()).document.upstreams[0];
+  assert.equal(saved.oauth.resource, 'https://jira.example/mcp'); assert.equal(saved.oauth.actorTokenEnv, 'JIRA_ACTOR_TOKEN');
+  assert.equal(saved.tls.clientKeyEnv, 'JIRA_CLIENT_KEY'); assert.deepEqual(errors, []);
 });
 
 test('action safeguards configure task capability and persist catalog and argument restrictions', async t => {
@@ -260,4 +282,37 @@ test('tool explorer discovers and invokes as a service identity and pins reviewe
   await page.getByRole('button',{name:'Pin reviewed definition to draft'}).click();await page.getByRole('button',{name:'Publish changes'}).click();await page.getByText('Revision 3 · connected',{exact:true}).waitFor();
   assert.match((await store.read()).document.toolContracts.alpha__echo,/^[a-f0-9]{64}$/);assert.deepEqual(errors,[]);
   assert.equal(await page.evaluate(()=>localStorage.length),0);
+});
+
+test('interactive scenario lab plays allow and deny flows and generates Codex setup for demo identities', async t => {
+  const app = express();
+  app.use(express.static(fileURLToPath(new URL('../website/dist/', import.meta.url))));
+  const url = await listen(app, t);
+  const browser = await launchBrowser(); t.after(() => browser.close());
+  const page = await browser.newPage(); page.setDefaultTimeout(5000);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${url}/lab.html`);
+  await page.getByRole('heading', { name: /See the decision/ }).waitFor();
+  assert.equal(await page.locator('.lab-scenario').count(), 10);
+  await page.getByRole('option', { name: /Read-only denies write/ }).click();
+  await page.getByRole('heading', { name: 'A reader tries to post a review comment' }).waitFor();
+  await page.getByRole('button', { name: /Play the flow/ }).click();
+  await page.getByText('Stopped before upstream').waitFor();
+  assert.equal(await page.locator('[data-flow-node="server"]').getAttribute('data-state'), null, 'denied request never reaches an MCP backend');
+  await page.getByLabel('Demo identity').selectOption('operator');
+  assert.match(await page.locator('#codex-config').innerText(), /relay-public-echo-demo-token/);
+  await page.getByLabel('Gateway endpoint').fill('https://demo.example.test/mcp');
+  assert.match(await page.locator('#codex-config').innerText(), /https:\/\/demo\.example\.test\/mcp/);
+  await page.getByRole('option', { name: /mTLS · two TLS sessions/ }).click();
+  await page.getByRole('heading', { name: 'Authenticate both sides of the gateway' }).waitFor();
+  await page.getByRole('img', { name: 'Agent-to-gateway and gateway-to-server mutual TLS' }).waitFor();
+  await page.getByRole('option', { name: /mTLS · reject untrusted peer/ }).click();
+  await page.getByRole('heading', { name: 'Reject an untrusted agent certificate' }).waitFor();
+  assert.match(await page.locator('#outcome-copy').innerText(), /TLS connection fails/);
+  await page.getByRole('option', { name: /OAuth · reject wrong audience/ }).click();
+  await page.getByRole('heading', { name: 'Stop a token issued for another resource' }).waitFor();
+  await page.getByRole('option', { name: /Invalid key rejected/ }).click();
+  await page.getByLabel('Demo identity').selectOption('invalid');
+  assert.match(await page.locator('#codex-config').innerText(), /deliberately-invalid-demo-token/);
+  assert.deepEqual(errors, []);
 });

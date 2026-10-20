@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
+import https from 'node:https';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { once } from 'node:events';
 import { OAuthCredentialProvider } from '../dist/credentials.js';
 import { validateConfig } from '../dist/validation.js';
 import { listen } from './helpers.js';
@@ -56,6 +60,46 @@ test('OAuth client-secret Basic encodes credentials before base64 and body auth 
   assert.equal(requests[1].body.client_id, credentials.oauth.clientId);
   assert.equal(requests[1].body.client_secret, credentials.oauth.clientSecret);
   await assert.rejects(new OAuthCredentialProvider(true).headers({ ...credentials, oauth: { ...credentials.oauth, clientAuthMethod: 'arbitrary' } }), /Unsupported OAuth client authentication method/);
+});
+
+test('delegated exchange requests an exact downstream resource and carries the configured actor credential only to the token service', async t => {
+  const received = [];
+  const app = express(); app.use(express.urlencoded({ extended: false }));
+  app.post('/token', (req, res) => { received.push({ body: req.body, authorization: req.get('authorization') }); res.json({ access_token: 'downstream-token', token_type: 'Bearer', expires_in: 300, issued_token_type: 'urn:ietf:params:oauth:token-type:access_token' }); });
+  const tokenService = await listen(app, t);
+  const upstream = { id: 'jira', url: 'https://jira.example/mcp', oauth: { mode: 'token_exchange', tokenEndpoint: `${tokenService}/token`, clientId: 'relay', clientSecret: 'relay-secret', actorToken: 'relay-actor', resource: 'https://jira.example/mcp', scope: 'issues:read' } };
+  const headers = await new OAuthCredentialProvider(true).headers(upstream, { id: 'agent', authScheme: 'jwt', allow: [] }, 'agent-subject-token');
+  assert.equal(headers.Authorization, 'Bearer downstream-token');
+  assert.equal(received[0].body.resource, upstream.oauth.resource);
+  assert.equal(received[0].body.actor_token, upstream.oauth.actorToken);
+  assert.equal(received[0].body.actor_token_type, 'urn:ietf:params:oauth:token-type:access_token');
+  assert.equal(received[0].body.subject_token, 'agent-subject-token');
+  assert.equal(received[0].authorization, `Basic ${Buffer.from('relay:relay-secret').toString('base64')}`);
+});
+
+test('RFC 8705 token-endpoint mTLS authenticates with the dedicated upstream certificate and no shared secret', async t => {
+  const cert = await readFile(fileURLToPath(new URL('./fixtures/mtls-test-cert.pem', import.meta.url)));
+  const key = await readFile(fileURLToPath(new URL('./fixtures/mtls-test-key.pem', import.meta.url)));
+  let authorized = false, requestBody, authorization;
+  const server = https.createServer({ cert, key, ca: cert, requestCert: true, rejectUnauthorized: true }, async (req, res) => {
+    authorized = req.socket.authorized;
+    authorization = req.headers.authorization;
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    requestBody = new URLSearchParams(raw);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ access_token: 'mtls-downstream-token', token_type: 'Bearer', expires_in: 300, issued_token_type: 'urn:ietf:params:oauth:token-type:access_token' }));
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const tls = { cert: cert.toString(), key: key.toString(), ca: cert.toString() };
+  const upstream = { id: 'jira', url: 'https://jira.example/mcp', tls: { clientCert: tls.cert, clientKey: tls.key, ca: tls.ca }, oauth: { mode: 'token_exchange', clientAuthMethod: 'tls_client_auth', tokenEndpoint: `https://localhost:${server.address().port}/token`, clientId: 'relay-mtls', resource: 'https://jira.example/mcp' } };
+  const headers = await new OAuthCredentialProvider().headers(upstream, { id: 'agent', authScheme: 'jwt', allow: [] }, 'caller-token', tls);
+  assert.equal(headers.Authorization, 'Bearer mtls-downstream-token');
+  assert.equal(authorized, true);
+  assert.equal(authorization, undefined);
+  assert.equal(requestBody.get('client_id'), 'relay-mtls');
+  assert.equal(requestBody.get('client_secret'), null);
+  assert.equal(requestBody.get('resource'), upstream.oauth.resource);
 });
 
 test('outbound provider attaches configured vendor API headers without replacing MCP transport headers', async () => {

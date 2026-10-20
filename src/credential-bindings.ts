@@ -1,13 +1,13 @@
 import { z } from 'zod';
 
-export type CredentialPurpose = 'upstream' | 'upstream-endpoint' | 'oauth-token' | 'oauth-recipient' | 'stdio-environment' | 'authorization-service' | 'routing-service' | 'inspection-service' | 'approval-service' | 'telemetry-endpoint' | 'telemetry-export' | 'telemetry-client-identity' | 'database';
+export type CredentialPurpose = 'upstream' | 'upstream-endpoint' | 'upstream-tls' | 'oauth-token' | 'oauth-recipient' | 'oauth-token-tls' | 'stdio-environment' | 'authorization-service' | 'routing-service' | 'inspection-service' | 'approval-service' | 'telemetry-endpoint' | 'telemetry-export' | 'telemetry-client-identity' | 'database';
 export interface CredentialBindingPolicy {
   assertAllowed(reference: string, endpoint: string, purpose: CredentialPurpose): void;
 }
 const bindingSchema = z.array(z.object({
   reference: z.string().regex(/^[A-Z][A-Z0-9_]*$/),
   endpoint: z.string().url().max(2048),
-  purpose: z.enum(['upstream', 'upstream-endpoint', 'oauth-token', 'oauth-recipient', 'stdio-environment', 'authorization-service', 'routing-service', 'inspection-service', 'approval-service', 'telemetry-endpoint', 'telemetry-export', 'telemetry-client-identity', 'database'])
+  purpose: z.enum(['upstream', 'upstream-endpoint', 'upstream-tls', 'oauth-token', 'oauth-recipient', 'oauth-token-tls', 'stdio-environment', 'authorization-service', 'routing-service', 'inspection-service', 'approval-service', 'telemetry-endpoint', 'telemetry-export', 'telemetry-client-identity', 'database'])
 }).strict()).max(10000);
 function canonical(value: string): string {
   const url = new URL(value);

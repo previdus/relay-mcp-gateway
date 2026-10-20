@@ -38,8 +38,8 @@ const capabilityDetails = {
   security: {
     tag: '05 / SECRETS & EGRESS', title: 'Bind credentials to the exact destination that may receive them.',
     summary: 'Keep secret values in the deployment secret source. Relay configuration holds references, and strict binding checks the destination before resolving a credential.',
-    modes: ['Separate inbound agent and upstream service identities', 'Exact URL, path and purpose bindings for each credential reference', 'DNS answer validation and strict egress checks', 'Private CIDR allowlists, origin checks and metadata-only audit events'],
-    example: 'reference: DOCS_TOKEN\nallowedUrl: https://docs.example/api\npurpose: bearer-auth\nstrictBindings: true',
+    modes: ['Separate agent, gateway and upstream identities', 'RFC 8693 delegated exchange with RFC 8707 downstream resource binding', 'Independent outbound mTLS identity; optional per-principal credential plugin', 'Exact endpoint/purpose bindings and DNS-pinned egress'],
+    example: 'mode: token_exchange\nresource: https://jira.example/mcp\nactor_token: gateway identity\nupstream mTLS: dedicated certificate',
     boundary: 'Network controls and secret delivery are deployment responsibilities. Protect credentials in logs, crash dumps, CI, backups and operator workflows too.',
     flow: ['Secret ref', 'Destination bind', 'Egress check', 'Secret resolver', 'Approved host'], focus: 1, caption: 'Relay checks the exact destination before resolving a credential reference.',
     link: 'docs.html#secrets'

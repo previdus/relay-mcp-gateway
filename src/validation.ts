@@ -2,6 +2,7 @@ import type { GatewayConfig } from './types.js';
 import { invocationPoliciesSchema, catalogPolicySchema } from './invocation-policy.js';
 import { discoverySchema } from './catalog.js';
 import { securityEndpoint } from './security-http.js';
+import { createSecureContext } from 'node:tls';
 export function validateConfig(config: GatewayConfig): GatewayConfig {
   if (config.discovery !== undefined && !discoverySchema.safeParse(config.discovery).success) throw new Error('Invalid discovery limits');
   if (config.inspectionTimeoutMs !== undefined && (!Number.isInteger(config.inspectionTimeoutMs) || config.inspectionTimeoutMs < 1 || config.inspectionTimeoutMs > 5000)) throw new Error('Invalid inspection timeout');
@@ -28,16 +29,31 @@ export function validateConfig(config: GatewayConfig): GatewayConfig {
     if (!/^[a-z][a-z0-9-]{0,31}$/.test(upstream.id) || ids.has(upstream.id)) throw new Error('Invalid or duplicate upstream id');
     ids.add(upstream.id);
     if (upstream.oauth) {
-      securityEndpoint(upstream.oauth.tokenEndpoint, config.allowLocalHttp);
-      if (!['client_credentials', 'token_exchange'].includes(upstream.oauth.mode) || upstream.oauth.clientAuthMethod !== undefined && !['client_secret_basic', 'client_secret_post'].includes(upstream.oauth.clientAuthMethod) || typeof upstream.oauth.clientId !== 'string' || !upstream.oauth.clientId || typeof upstream.oauth.clientSecret !== 'string') throw new Error('Invalid upstream OAuth client authentication configuration');
+      const tokenEndpoint = securityEndpoint(upstream.oauth.tokenEndpoint, config.allowLocalHttp);
+      if (upstream.tls && tokenEndpoint.protocol !== 'https:') throw new Error('Upstream client TLS requires an HTTPS OAuth token endpoint');
+      const clientAuthMethod = upstream.oauth.clientAuthMethod ?? 'client_secret_basic';
+      const mtlsClientAuth = clientAuthMethod === 'tls_client_auth' || clientAuthMethod === 'self_signed_tls_client_auth';
+      if (!['client_credentials', 'token_exchange'].includes(upstream.oauth.mode) || !['client_secret_basic', 'client_secret_post', 'tls_client_auth', 'self_signed_tls_client_auth'].includes(clientAuthMethod) || typeof upstream.oauth.clientId !== 'string' || !upstream.oauth.clientId || (mtlsClientAuth ? !upstream.tls || upstream.oauth.clientSecret !== undefined : typeof upstream.oauth.clientSecret !== 'string' || !upstream.oauth.clientSecret)) throw new Error('Invalid upstream OAuth client authentication configuration');
+      if (upstream.oauth.resource !== undefined) {
+        try { securityEndpoint(upstream.oauth.resource); } catch { throw new Error('Invalid upstream OAuth resource indicator'); }
+      }
+      if (upstream.oauth.actorToken !== undefined && (upstream.oauth.mode !== 'token_exchange' || !upstream.oauth.actorToken || upstream.oauth.actorToken.length > 8192 || /[\r\n\0]/.test(upstream.oauth.actorToken))) throw new Error('Actor tokens are valid only for token exchange and must be bounded');
+      if (upstream.oauth.actorTokenType !== undefined && upstream.oauth.mode !== 'token_exchange') throw new Error('Actor token type requires token exchange');
       if (upstream.token) throw new Error('Select either static or OAuth upstream credentials');
+    }
+    if (upstream.tls) {
+      if (!upstream.tls.clientCert || !upstream.tls.clientKey || Buffer.byteLength(upstream.tls.clientCert) > 65536 || Buffer.byteLength(upstream.tls.clientKey) > 65536 || upstream.tls.ca !== undefined && (!upstream.tls.ca || Buffer.byteLength(upstream.tls.ca) > 65536) || /\0/.test(upstream.tls.clientCert + upstream.tls.clientKey + (upstream.tls.ca ?? ''))) throw new Error('Invalid upstream TLS credentials');
+      try { createSecureContext({ cert: upstream.tls.clientCert, key: upstream.tls.clientKey, ...(upstream.tls.ca ? { ca: upstream.tls.ca } : {}) }); }
+      catch { throw new Error('Invalid upstream TLS credentials'); }
     }
     const url = new URL(upstream.url);
     if (upstream.requestPaths !== undefined && (!Array.isArray(upstream.requestPaths) || !upstream.requestPaths.length || upstream.requestPaths.length > 32 || upstream.requestPaths.some(path => typeof path !== 'string' || path.length > 2048 || !path.startsWith('/') || path.startsWith('//') || /[\\?#%\s]/.test(path) || new URL(path, 'https://validation.example').pathname !== path) || !upstream.requestPaths.includes(url.pathname))) throw new Error('Invalid upstream request paths');
     if (url.username || url.password || url.hash) throw new Error('Credentials and fragments are forbidden in upstream URLs');
+    if (upstream.tls && url.protocol !== 'https:') throw new Error('Upstream client TLS requires HTTPS');
     if (upstream.transport === 'stdio') {
       if (!upstream.command || url.protocol !== 'stdio:') throw new Error('Stdio requires an approved command and stdio URI');
       if (upstream.oauth || upstream.token) throw new Error('Stdio credentials must use explicit environment references');
+      if (upstream.tls) throw new Error('HTTP client TLS credentials cannot be used with stdio transports');
       continue;
     }
     if (url.protocol !== 'https:' && !(config.allowLocalHttp && url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname))) throw new Error('Upstreams require HTTPS (or explicitly enabled loopback HTTP)');

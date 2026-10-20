@@ -32,7 +32,9 @@ export interface Upstream {
   command?: string;
   args?: string[];
   environment?: Record<string, string>;
-  oauth?: { mode: 'client_credentials' | 'token_exchange'; clientAuthMethod?: 'client_secret_basic' | 'client_secret_post'; tokenEndpoint: string; clientId: string; clientSecret: string; scope?: string; audience?: string };
+  oauth?: { mode: 'client_credentials' | 'token_exchange'; clientAuthMethod?: 'client_secret_basic' | 'client_secret_post' | 'tls_client_auth' | 'self_signed_tls_client_auth'; tokenEndpoint: string; clientId: string; clientSecret?: string; scope?: string; audience?: string; resource?: string; actorToken?: string; actorTokenType?: 'urn:ietf:params:oauth:token-type:access_token' | 'urn:ietf:params:oauth:token-type:jwt' };
+  /** Dedicated gateway-to-upstream TLS identity. Never inherited from the inbound agent connection. */
+  tls?: { clientCert: string; clientKey: string; ca?: string };
 }
 
 export interface GatewayConfig {
