@@ -8,9 +8,17 @@ Parameters:
   GitHubOwner:
     Type: String
     Description: GitHub user or organization that owns the public repository.
+  GitHubOwnerId:
+    Type: Number
+    MinValue: 1
+    Description: Immutable GitHub account ID used in the OIDC subject claim.
   GitHubRepository:
     Type: String
     Default: relay-mcp-gateway
+  GitHubRepositoryId:
+    Type: Number
+    MinValue: 1
+    Description: Immutable GitHub repository ID used in the OIDC subject claim.
   GitHubOidcProviderArn:
     Type: String
     Description: AWS IAM OIDC provider ARN for https://token.actions.githubusercontent.com.
@@ -211,7 +219,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOwner}/${GitHubRepository}:ref:refs/heads/main'
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepository}@${GitHubRepositoryId}:environment:demo'
       Policies:
         - PolicyName: DeployRelayImageAndWebsite
           PolicyDocument:

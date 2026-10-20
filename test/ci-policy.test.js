@@ -55,3 +55,11 @@ test('CI audits locked dependencies and pins external actions to reviewed commit
       `${action.uses} must use a full commit SHA and retain a readable release tag`);
   }
 });
+
+test('AWS OIDC deployment subject matches the immutable repository and environment-scoped IAM trust policy', async () => {
+  const source = await readFile(new URL('../.github/workflows/deploy-aws.yml', import.meta.url), 'utf8');
+  const workflow = YAML.parse(source);
+  const template = await readFile(new URL('../deploy/aws/template.yaml', import.meta.url), 'utf8');
+  assert.equal(workflow.jobs.deploy.environment, 'demo');
+  assert.match(template, /token\.actions\.githubusercontent\.com:sub:\s*!Sub\s+'repo:\$\{GitHubOwner\}@\$\{GitHubOwnerId\}\/\$\{GitHubRepository\}@\$\{GitHubRepositoryId\}:environment:demo'/);
+});

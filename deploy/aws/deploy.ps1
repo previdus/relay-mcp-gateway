@@ -12,7 +12,7 @@ foreach ($tool in @('aws', 'docker', 'node', 'npm')) {
   if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "Required tool not found: $tool" }
 }
 if ($WhatIfPreference) {
-  Write-Host "Plan: build the public echo container; create/update stack '$StackName' in $Region; publish the static site; enable the gateway host allowlist. No cloud resources were changed."
+  Write-Host "Plan: build the public synthetic integration demo; create/update stack '$StackName' in $Region; publish the static site; enable the gateway host allowlist. No cloud resources were changed."
   return
 }
 
@@ -20,6 +20,11 @@ $null = aws sts get-caller-identity --region $Region 2>$null
 if ($LASTEXITCODE -ne 0) { throw 'AWS sign-in was not available for this profile. Configure AWS CLI credentials with IAM Identity Center or a named profile, then retry.' }
 $owner = Read-Host 'GitHub account or organization that owns relay-mcp-gateway'
 if (-not $owner -or $owner -notmatch '^[A-Za-z0-9-]+$') { throw 'Enter a valid GitHub owner.' }
+$githubRepository = Invoke-RestMethod -Uri "https://api.github.com/repos/$owner/relay-mcp-gateway" -Headers @{ 'User-Agent' = 'Relay-MCP-Gateway-Deployment'; Accept = 'application/vnd.github+json' }
+if ($githubRepository.owner.login -ine $owner -or $githubRepository.name -ne 'relay-mcp-gateway' -or $githubRepository.owner.id -lt 1 -or $githubRepository.id -lt 1) { throw 'Could not verify the public GitHub repository identity.' }
+$owner = $githubRepository.owner.login
+$githubOwnerId = $githubRepository.owner.id
+$githubRepositoryId = $githubRepository.id
 
 $accountId = aws sts get-caller-identity --query Account --output text --region $Region
 $registry = "$accountId.dkr.ecr.$Region.amazonaws.com"
@@ -57,7 +62,7 @@ if ($provider) {
 }
 
 $template = Join-Path $PSScriptRoot 'template.yaml'
-$baseParameters = @("ImageUri=$imageUri", "GitHubOwner=$owner", 'GitHubRepository=relay-mcp-gateway', "GitHubOidcProviderArn=$providerArn", 'GatewayAllowedHosts=')
+$baseParameters = @("ImageUri=$imageUri", "GitHubOwner=$owner", "GitHubOwnerId=$githubOwnerId", 'GitHubRepository=relay-mcp-gateway', "GitHubRepositoryId=$githubRepositoryId", "GitHubOidcProviderArn=$providerArn", 'GatewayAllowedHosts=')
 if (-not $PSCmdlet.ShouldProcess("AWS $Region / $StackName", 'Create the public Relay demo and static website')) { return }
 aws cloudformation deploy --template-file $template --stack-name $StackName --capabilities CAPABILITY_NAMED_IAM --region $Region --parameter-overrides $baseParameters
 if ($LASTEXITCODE -ne 0) { throw 'CloudFormation failed while creating the AWS demo stack.' }
@@ -65,7 +70,7 @@ if ($LASTEXITCODE -ne 0) { throw 'CloudFormation failed while creating the AWS d
 $endpoint = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='McpEndpoint'].OutputValue | [0]" --output text
 if ($LASTEXITCODE -ne 0 -or -not $endpoint.StartsWith('https://')) { throw 'Could not read the App Runner MCP endpoint.' }
 $allowedHost = ([uri]$endpoint).Host
-$finalParameters = @("ImageUri=$imageUri", "GitHubOwner=$owner", 'GitHubRepository=relay-mcp-gateway', "GitHubOidcProviderArn=$providerArn", "GatewayAllowedHosts=$allowedHost")
+$finalParameters = @("ImageUri=$imageUri", "GitHubOwner=$owner", "GitHubOwnerId=$githubOwnerId", 'GitHubRepository=relay-mcp-gateway', "GitHubRepositoryId=$githubRepositoryId", "GitHubOidcProviderArn=$providerArn", "GatewayAllowedHosts=$allowedHost")
 aws cloudformation deploy --template-file $template --stack-name $StackName --capabilities CAPABILITY_NAMED_IAM --region $Region --parameter-overrides $finalParameters
 if ($LASTEXITCODE -ne 0) { throw 'Could not apply the generated App Runner hostname allowlist.' }
 
