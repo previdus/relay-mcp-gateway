@@ -6,6 +6,16 @@ import { discoverySchema } from './catalog.js';
 import { environmentCredentialBindings, type CredentialBindingPolicy } from './credential-bindings.js';
 
 const environmentKey = z.string().regex(/^[A-Z][A-Z0-9_]*$/);
+const headerName = z.string().min(1).max(128).regex(/^[!#$%&'*+.^_`|~A-Za-z0-9-]+$/);
+const reservedHeaders = new Set(['authorization', 'proxy-authorization', 'host', 'connection', 'content-length', 'transfer-encoding', 'upgrade', 'cookie', 'set-cookie', 'origin', 'forwarded', 'accept', 'accept-encoding', 'content-type', 'mcp-method', 'mcp-name', 'mcp-protocol-version', 'mcp-session-id']);
+function validateHeaderReferences(headers: Record<string, string>) {
+  const seen = new Set<string>();
+  for (const name of Object.keys(headers)) {
+    const lower = name.toLowerCase();
+    if (reservedHeaders.has(lower) || lower.startsWith('proxy-') || lower.startsWith('sec-') || lower.startsWith('x-forwarded-') || seen.has(lower)) throw new Error('Invalid upstream header reference');
+    seen.add(lower);
+  }
+}
 const ratePolicy = z.object({ capacity: z.number().int().min(1).max(1000000), refillPerSecond: z.number().min(0.001).max(1000000) }).strict();
 export const configSchema = z.object({
   discovery: discoverySchema.optional(),
@@ -50,6 +60,7 @@ export const configSchema = z.object({
     tenantId: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/).optional(),
     url: z.string().url(),
     tokenEnv: environmentKey.optional(),
+    headerEnvRefs: z.record(headerName, environmentKey).refine(headers => Object.keys(headers).length <= 32).optional(),
     transport: z.enum(['streamable-http', 'sse', 'stdio']).optional(),
     timeoutMs: z.number().int().min(1).max(120000).optional(),
     connectTimeoutMs: z.number().int().min(1).max(120000).optional(),
@@ -76,6 +87,10 @@ export function loadConfig(input: unknown, environment: NodeJS.ProcessEnv = proc
       for (const path of upstream.requestPaths ?? []) bindings.assertAllowed(destination, new URL(path, upstream.url).href, 'upstream-endpoint');
     }
     if (upstream.tokenEnv) bindings?.assertAllowed(upstream.tokenEnv, upstream.url, 'upstream');
+    if (upstream.headerEnvRefs) {
+      validateHeaderReferences(upstream.headerEnvRefs);
+      for (const reference of Object.values(upstream.headerEnvRefs)) bindings?.assertAllowed(reference, upstream.url, 'upstream');
+    }
     if (upstream.oauth) {
       bindings?.assertAllowed(upstream.oauth.clientSecretEnv, upstream.oauth.tokenEndpoint, 'oauth-token');
       bindings?.assertAllowed(upstream.oauth.clientSecretEnv, upstream.url, 'oauth-recipient');
@@ -87,6 +102,7 @@ export function loadConfig(input: unknown, environment: NodeJS.ProcessEnv = proc
     if (bindings && upstream.transport === 'sse' && !upstream.requestPaths) throw new Error('Deployment-bound SSE requires explicit request paths');
     for (const path of upstream.requestPaths ?? []) {
       if (upstream.tokenEnv) bindings?.assertAllowed(upstream.tokenEnv, new URL(path, upstream.url).href, 'upstream');
+      if (upstream.headerEnvRefs) for (const reference of Object.values(upstream.headerEnvRefs)) bindings?.assertAllowed(reference, new URL(path, upstream.url).href, 'upstream');
       if (upstream.oauth) bindings?.assertAllowed(upstream.oauth.clientSecretEnv, new URL(path, upstream.url).href, 'oauth-recipient');
     }
   }
@@ -98,6 +114,6 @@ export function loadConfig(input: unknown, environment: NodeJS.ProcessEnv = proc
   return validateConfig({
     ...raw,
     clients: raw.clients.map(({ tokenEnv, ...client }) => ({ ...client, ...(tokenEnv ? { token: credential(tokenEnv) } : {}) })),
-    upstreams: raw.upstreams.map(({ tokenEnv, envRefs, oauth, ...upstream }) => ({ ...upstream, ...(tokenEnv ? { token: credential(tokenEnv) } : {}), ...(envRefs ? { environment: Object.fromEntries(Object.entries(envRefs).map(([name, ref]) => [name, credential(ref)])) } : {}), ...(oauth ? { oauth: { mode: oauth.mode, clientAuthMethod: oauth.clientAuthMethod ?? 'client_secret_basic', tokenEndpoint: oauth.tokenEndpoint, scope: oauth.scope, audience: oauth.audience, clientId: credential(oauth.clientIdEnv), clientSecret: credential(oauth.clientSecretEnv) } } : {}) }))
+    upstreams: raw.upstreams.map(({ tokenEnv, headerEnvRefs, envRefs, oauth, ...upstream }) => ({ ...upstream, ...(tokenEnv ? { token: credential(tokenEnv) } : {}), ...(headerEnvRefs ? { headers: Object.fromEntries(Object.entries(headerEnvRefs).map(([name, ref]) => { const value = credential(ref); if (/[\r\n\0]/.test(value) || Buffer.byteLength(value) > 8192) throw new Error('Invalid upstream header credential'); return [name, value]; })) } : {}), ...(envRefs ? { environment: Object.fromEntries(Object.entries(envRefs).map(([name, ref]) => [name, credential(ref)])) } : {}), ...(oauth ? { oauth: { mode: oauth.mode, clientAuthMethod: oauth.clientAuthMethod ?? 'client_secret_basic', tokenEndpoint: oauth.tokenEndpoint, scope: oauth.scope, audience: oauth.audience, clientId: credential(oauth.clientIdEnv), clientSecret: credential(oauth.clientSecretEnv) } } : {}) }))
   });
 }

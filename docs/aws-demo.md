@@ -1,6 +1,6 @@
 # AWS demo deployment
 
-This deployment is a public, low-traffic **demo**, not a production tenant. It serves the static Relay website through a private S3 bucket and CloudFront, and runs the gateway's harmless echo demo on AWS App Runner. The public client is intentionally limited to the echo alias. The administrator key is generated into AWS Secrets Manager; the demo database is in memory and resets when App Runner replaces its instance.
+This deployment is a public, low-traffic **demo**, not a production tenant. It serves the static Relay website through a private S3 bucket and CloudFront, and runs the gateway with synthetic Jira, AWS/CloudWatch, Gmail, Slack, Drive, and log MCP upstreams on AWS App Runner. The public client can use only these local fixtures and safe preview actions; it cannot reach customer accounts. The administrator key is generated into AWS Secrets Manager; the demo database is in memory and resets when App Runner replaces its instance.
 
 ## Region and cost controls
 
@@ -20,7 +20,7 @@ $env:AWS_REGION = "us-east-1"
 ./deploy/aws/deploy.ps1
 ```
 
-The script builds the container and website, creates or reuses the ECR image repository, pushes the demo image, creates the CloudFormation stack, reads the random App Runner URL, then updates the gateway host allowlist before uploading the site. It prints the site URL, MCP URL, administrator secret ARN and stack name. Retrieve the admin key only in your AWS Console or through `secretsmanager:GetSecretValue`; never put it in a public issue or website. The demo service key is public by design and only permits `echo`.
+The script builds the container and website, creates or reuses the ECR image repository, pushes the demo image, creates the CloudFormation stack, reads the random App Runner URL, then updates the gateway host allowlist before uploading the site. It prints the site URL, MCP URL, administrator secret ARN and stack name. Retrieve the admin key only in your AWS Console or through `secretsmanager:GetSecretValue`; never put it in a public issue or website. The demo service key is public by design and only permits synthetic fixture tools and the `enterprise_search` route; create/draft/post tools return previews and never perform external actions.
 
 The first CloudFront distribution can take several minutes to become available. `deploy.ps1 -WhatIf` validates required local tools and shows the planned stack parameters without creating cloud resources.
 
@@ -32,4 +32,4 @@ To stop ongoing compute, pause App Runner. To remove the demo, run `./deploy/aws
 
 ## Production path
 
-This demo has one App Runner instance and in-memory state. It does not demonstrate horizontally shared administration state. For a multi-replica deployment, use the included Kubernetes or Compose deployment with PostgreSQL, TLS at a trusted ingress, shared secrets, backups, bounded autoscaling and outbound network policy. The hosted echo demo does not accept customer credentials or connect to customer servers.
+This demo has one App Runner instance and in-memory state. It does not demonstrate horizontally shared administration state. For a multi-replica deployment, use the included Kubernetes or Compose deployment with PostgreSQL, TLS at a trusted ingress, shared secrets, backups, bounded autoscaling and outbound network policy. The hosted demo does not accept customer credentials or connect to customer servers. See [server interoperability limits](integration-compatibility.md) before connecting real product accounts.

@@ -54,7 +54,7 @@ The [30-source review](docs/research-review.md) records findings from 20 enginee
 
 ## Try it locally
 
-For the first AWS-hosted public demonstration, see the [AWS demo guide](docs/aws-demo.md). It uses a one-instance App Runner echo service and a CloudFront-hosted static site. No AWS budget alert is configured; monitor spending in Billing and Cost Management.
+For the AWS-hosted public demonstration, see the [AWS demo guide](docs/aws-demo.md). It uses a one-instance App Runner gateway with synthetic enterprise fixtures and a CloudFront-hosted static site. No AWS budget alert is configured; monitor spending in Billing and Cost Management.
 
 
 
@@ -76,7 +76,9 @@ Open `http://127.0.0.1:3000/admin/` and enter the generated **admin key** printe
 
 
 
-The demo starts a legacy MCP upstream on port 4101 and a modern upstream on port 4102. Tools are exposed as `alpha__echo`, `beta__echo`, and the sticky alias `echo`. Call with `{"text":"hello"}`. Its database is in memory; restarting discards changes and rotates keys.
+The demo starts a legacy MCP upstream, a modern upstream, and safe local simulations for Jira, AWS, Gmail, Slack, Google Drive, and application logs. Product-like tools are exposed with names such as `jira__search`, `aws__cloudwatch_logs`, and `gmail__create_draft`; the `enterprise_search` alias demonstrates priority routing across multiple servers. Simulated writes return previews and never touch real accounts. All demo data is synthetic. The in-memory database is discarded and demo keys rotate on restart.
+
+See [MCP server interoperability and integration limits](docs/integration-compatibility.md) for supported transports/capabilities, vendor authentication patterns, and the remaining OAuth account-linking boundary.
 
 
 

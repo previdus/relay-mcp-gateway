@@ -41,14 +41,14 @@ test('website build contains a product story, sourced comparison and complete do
   assert.match(docs, /data-config-scenario="blocked"/);
   assert.match(docs, /data-config-step="destination"/);
   assert.match(docs, /This is an explanatory prototype/);
-  assert.match(docs, /20 settings/);
+  assert.match(docs, /21 settings/);
   assert.match(docs, /data-setting-search="GATEWAY_CREDENTIAL_BINDINGS"/);
   for (const group of ['identity', 'permissions', 'upstreams', 'routing', 'runtime']) {
     assert.match(docs, new RegExp(`data-group="${group}"`));
   }
   const configTable = docs.match(/<table class="doc-table" id="config-table">[\s\S]*?<\/table>/)?.[0];
   const groupedRows = [...(configTable ?? '').matchAll(/<tr data-setting-group="([^"]+)"/g)];
-  assert.equal(groupedRows.length, 20, 'every configuration row belongs to one explorable group');
+  assert.equal(groupedRows.length, 21, 'every configuration row belongs to one explorable group');
   assert.deepEqual([...new Set(groupedRows.map((row) => row[1]))].sort(), ['identity', 'permissions', 'routing', 'runtime', 'upstreams']);
   assert.match(docs, /Microsoft/);
   assert.match(docs, /Gravitee/);

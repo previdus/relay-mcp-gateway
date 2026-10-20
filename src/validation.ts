@@ -17,6 +17,12 @@ export function validateConfig(config: GatewayConfig): GatewayConfig {
   if (!config.clients?.length || !Array.isArray(config.upstreams)) throw new Error('Clients and upstreams are required');
   const ids = new Set();
   for (const upstream of config.upstreams) {
+    const headerNames = new Set<string>();
+    for (const [name, value] of Object.entries(upstream.headers ?? {})) {
+      const lower = name.toLowerCase();
+      if (!/^[!#$%&'*+.^_`|~A-Za-z0-9-]{1,128}$/.test(name) || ['authorization','proxy-authorization','host','connection','content-length','transfer-encoding','upgrade','cookie','set-cookie','origin','forwarded','accept','accept-encoding','content-type','mcp-method','mcp-name','mcp-protocol-version','mcp-session-id'].includes(lower) || lower.startsWith('proxy-') || lower.startsWith('sec-') || lower.startsWith('x-forwarded-') || headerNames.has(lower) || typeof value !== 'string' || !value || /[\r\n\0]/.test(value) || Buffer.byteLength(value) > 8192) throw new Error('Invalid upstream header configuration');
+      headerNames.add(lower);
+    }
     for (const budget of [upstream.timeoutMs, upstream.connectTimeoutMs]) if (budget !== undefined && (!Number.isInteger(budget) || budget < 1 || budget > 120000)) throw new Error('Invalid upstream timeout');
     if (upstream.discoveryCacheTtlMs !== undefined && (!Number.isInteger(upstream.discoveryCacheTtlMs) || upstream.discoveryCacheTtlMs < 1 || upstream.discoveryCacheTtlMs > 60000)) throw new Error('Invalid protocol discovery cache TTL');
     if (!/^[a-z][a-z0-9-]{0,31}$/.test(upstream.id) || ids.has(upstream.id)) throw new Error('Invalid or duplicate upstream id');

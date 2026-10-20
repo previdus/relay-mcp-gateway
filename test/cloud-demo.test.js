@@ -16,11 +16,12 @@ async function freePort() {
   return port;
 }
 
-test('public cloud demo exposes and authorizes only its echo tool', async t => {
-  const [port, alphaPort, betaPort] = await Promise.all([freePort(), freePort(), freePort()]);
-  assert.equal(new Set([port, alphaPort, betaPort]).size, 3);
+test('public cloud demo exposes only synthetic product fixtures and safe preview actions', async t => {
+  const ports = await Promise.all(Array.from({ length: 9 }, () => freePort()));
+  const [port, alphaPort, betaPort, ...integrationPorts] = ports;
+  assert.equal(new Set(ports).size, ports.length);
   const child = spawn(process.execPath, ['dist/cloud-demo.js'], {
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DEMO_ALPHA_PORT: String(alphaPort), DEMO_BETA_PORT: String(betaPort), GATEWAY_ADMIN_KEY: 'test-admin-key-that-is-long-enough-123', DEMO_TOKEN: 'test-public-echo-token-123456' },
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DEMO_ALPHA_PORT: String(alphaPort), DEMO_BETA_PORT: String(betaPort), ...Object.fromEntries(integrationPorts.map((value, index) => [`DEMO_INTEGRATION_${index + 1}_PORT`, String(value)])), GATEWAY_ADMIN_KEY: 'test-admin-key-that-is-long-enough-123', DEMO_TOKEN: 'test-public-echo-token-123456' },
     stdio: ['ignore', 'ignore', 'pipe']
   });
   let stderr = '';
@@ -66,9 +67,14 @@ test('public cloud demo exposes and authorizes only its echo tool', async t => {
 
   client = new Client({ name: 'cloud-demo-smoke', version: '1' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: 'Bearer test-public-echo-token-123456' } } }));
-  assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ['echo']);
+  const tools = (await client.listTools()).tools.map(tool => tool.name);
+  for (const name of ['echo', 'enterprise_search', 'jira__search', 'aws__cloudwatch_logs', 'gmail__create_draft', 'slack__post_message', 'drive__read_file', 'logs__query']) assert.ok(tools.includes(name), `missing public-safe demo tool ${name}`);
+  assert.ok(!tools.some(name => name === 'alpha__echo' || name === 'beta__echo'));
   const echo = await client.callTool({ name: 'echo', arguments: { text: 'safe public sample' } });
   assert.equal(echo.isError, undefined);
   assert.match(JSON.stringify(echo), /safe public sample/);
+  assert.equal((await client.callTool({ name: 'gmail__create_draft', arguments: { to: 'demo@example.test', subject: 'Test', body: 'Synthetic only' } })).structuredContent.preview, true);
+  assert.equal((await client.callTool({ name: 'slack__post_message', arguments: { channel: 'demo', text: 'Synthetic only' } })).structuredContent.preview, true);
+  assert.equal((await client.callTool({ name: 'enterprise_search', arguments: { query: 'access review' } })).structuredContent.source, 'jira-demo');
   await assert.rejects(client.callTool({ name: 'alpha__echo', arguments: { text: 'must not escape demo scope' } }));
 });

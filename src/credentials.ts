@@ -8,7 +8,7 @@ export class OAuthCredentialProvider implements CredentialProvider {
   private cache = new Map<string, Promise<CachedToken>>();
   constructor(private allowLocalHttp = false, private egressPolicy?: EgressPolicy) {}
   async headers(upstream: Upstream, principal?: ServiceClient, subjectToken?: string): Promise<Record<string, string>> {
-    if (!upstream.oauth) return upstream.token ? { Authorization: `Bearer ${upstream.token}` } : {};
+    if (!upstream.oauth) return { ...(upstream.headers ?? {}), ...(upstream.token ? { Authorization: `Bearer ${upstream.token}` } : {}) };
     const oauth = upstream.oauth;
     securityEndpoint(oauth.tokenEndpoint, this.allowLocalHttp);
     if (oauth.mode === 'token_exchange' && (principal?.authScheme !== 'jwt' || !subjectToken)) throw new Error('Token exchange requires a verified JWT principal');
@@ -16,7 +16,7 @@ export class OAuthCredentialProvider implements CredentialProvider {
     let pending = this.cache.get(key);
     if (pending) {
       const cached = await pending;
-      if (cached.expires > Date.now()) return { Authorization: `Bearer ${cached.token}` };
+      if (cached.expires > Date.now()) return { ...(upstream.headers ?? {}), Authorization: `Bearer ${cached.token}` };
       // Another caller may already have replaced the expired promise while this
       // caller was awaiting it. Never delete or duplicate that new exchange.
       if (this.cache.get(key) === pending) this.cache.delete(key);
@@ -28,7 +28,7 @@ export class OAuthCredentialProvider implements CredentialProvider {
       const exchange = pending;
       void exchange.catch(() => { if (this.cache.get(key) === exchange) this.cache.delete(key); });
     }
-    return { Authorization: `Bearer ${(await pending).token}` };
+    return { ...(upstream.headers ?? {}), Authorization: `Bearer ${(await pending).token}` };
   }
   private async exchange(upstream: Upstream, subjectToken?: string): Promise<CachedToken> {
     const oauth = upstream.oauth!;

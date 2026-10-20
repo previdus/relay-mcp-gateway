@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Relay public echo demo: App Runner gateway and private S3 website behind CloudFront.'
+Description: 'Relay public synthetic MCP integration demo: App Runner gateway and private S3 website behind CloudFront.'
 Parameters:
   ImageUri:
     Type: String
@@ -257,7 +257,7 @@ Outputs:
     Description: HTTPS App Runner gateway URL.
     Value: !Sub 'https://${GatewayService.ServiceUrl}'
   McpEndpoint:
-    Description: MCP Streamable HTTP endpoint. Demo bearer key only permits the echo tool.
+    Description: MCP Streamable HTTP endpoint. Public bearer key permits synthetic demo fixtures only.
     Value: !Sub 'https://${GatewayService.ServiceUrl}/mcp'
   GatewayAdminSecretArn:
     Description: Secret ARN for the generated gateway administrator key.

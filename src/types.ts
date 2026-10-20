@@ -20,6 +20,8 @@ export interface Upstream {
   id: string;
   url: string;
   token?: string;
+  /** Operator-provisioned outbound HTTP headers for non-Bearer upstream auth or tenant routing. */
+  headers?: Record<string, string>;
   transport?: 'streamable-http' | 'sse' | 'stdio';
   tenantId?: string;
   timeoutMs?: number;

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { OAuthCredentialProvider } from '../dist/credentials.js';
+import { validateConfig } from '../dist/validation.js';
 import { listen } from './helpers.js';
 
 test('expired OAuth tokens refresh once under concurrent callers and reject unsafe token responses', async t => {
@@ -55,4 +56,10 @@ test('OAuth client-secret Basic encodes credentials before base64 and body auth 
   assert.equal(requests[1].body.client_id, credentials.oauth.clientId);
   assert.equal(requests[1].body.client_secret, credentials.oauth.clientSecret);
   await assert.rejects(new OAuthCredentialProvider(true).headers({ ...credentials, oauth: { ...credentials.oauth, clientAuthMethod: 'arbitrary' } }), /Unsupported OAuth client authentication method/);
+});
+
+test('outbound provider attaches configured vendor API headers without replacing MCP transport headers', async () => {
+  const headers = await new OAuthCredentialProvider(true).headers({ id: 'jira', url: 'https://jira.example/mcp', headers: { 'X-API-Key': 'jira-demo-secret', 'X-Workspace': 'team-42' } });
+  assert.deepEqual(headers, { 'X-API-Key': 'jira-demo-secret', 'X-Workspace': 'team-42' });
+  assert.throws(() => validateConfig({ clients: [{ id: 'a', token: 'long-test-token-1234567890', allow: [] }], upstreams: [{ id: 'jira', url: 'https://jira.example/mcp', headers: { Authorization: 'Bearer should-not-be-configurable-here' } }] }), /Invalid upstream header configuration/);
 });

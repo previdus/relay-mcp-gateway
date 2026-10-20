@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadConfig } from '../dist/config.js';
+import { ExactCredentialBindings } from '../dist/credential-bindings.js';
 import { ApiKeyAuthenticator } from '../dist/plugins.js';
 import { mappedIdentity } from '../dist/authentication.js';
 
@@ -14,6 +15,20 @@ test('resolves separate gateway and upstream credentials', () => {
   assert.equal(resolved.clients[0].token, environment.GATEWAY_KEY);
   assert.equal(resolved.upstreams[0].token, environment.UPSTREAM_KEY);
   assert.equal(config.clients[0].token, undefined);
+});
+test('resolves vendor-specific outbound headers only when their exact secret destinations are approved', () => {
+  const endpoint = 'https://jira.example/mcp';
+  const policy = new ExactCredentialBindings([
+    { reference: 'MCP_UPSTREAM_ALPHA', purpose: 'upstream-endpoint', endpoint },
+    { reference: 'JIRA_API_KEY', purpose: 'upstream', endpoint },
+    { reference: 'JIRA_WORKSPACE', purpose: 'upstream', endpoint }
+  ]);
+  const input = { ...config, upstreams: [{ id: 'alpha', url: endpoint, headerEnvRefs: { 'X-API-Key': 'JIRA_API_KEY', 'X-Workspace': 'JIRA_WORKSPACE' } }] };
+  const testEnvironment = { ...environment, JIRA_API_KEY: 'scoped-api-key', JIRA_WORKSPACE: 'team-42' };
+  const resolved = loadConfig(input, testEnvironment, policy);
+  assert.deepEqual(resolved.upstreams[0].headers, { 'X-API-Key': 'scoped-api-key', 'X-Workspace': 'team-42' });
+  assert.throws(() => loadConfig(input, testEnvironment, new ExactCredentialBindings([{ reference: 'MCP_UPSTREAM_ALPHA', purpose: 'upstream-endpoint', endpoint: 'https://other.example/mcp' }, { reference: 'JIRA_API_KEY', purpose: 'upstream', endpoint: 'https://other.example/mcp' }, { reference: 'JIRA_WORKSPACE', purpose: 'upstream', endpoint }])), /not approved/);
+  assert.throws(() => loadConfig({ ...config, upstreams: [{ id: 'alpha', url: endpoint, headerEnvRefs: { Authorization: 'JIRA_API_KEY' } }] }, { ...environment, JIRA_API_KEY: 'scoped-api-key' }), /Invalid upstream header reference/);
 });
 test('fails closed on absent credentials and malformed policies', () => {
   assert.throws(() => loadConfig(config, {}), /Missing credential environment variable/);
